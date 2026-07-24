@@ -188,6 +188,7 @@ python -m benchmarks.eval.benchmark_omni_seedtts \
 | `eval/benchmark_omni_videoamme.py` | Video-AMME (video + audio question understanding) | Qwen3-Omni | `/v1/chat/completions` |
 | `eval/benchmark_asr_seedtts.py` | ASR concurrency scaling on SeedTTS EN/ZH | Qwen3-ASR, Fun-ASR, Whisper | `/v1/audio/transcriptions` |
 | `eval/benchmark_asr_stability.py` | ASR functional, soak, chaos, and memory-retention validation | Qwen3-ASR, Fun-ASR, Whisper | `/v1/audio/transcriptions`, `/v1/audio/translations`, `/health` |
+| `eval/benchmark_whisper_translation.py` | Pinned CoVoST2 zh-to-English quality and speed | Whisper | `/v1/audio/translations` |
 
 See [tts_serving/README.md](tts_serving/README.md) for the TTS serving
 benchmark design, harness contract, scenario matrix, and Docker usage.
@@ -314,6 +315,44 @@ though the API can detect a missing source language. Do not enable
 `--check-audio-boundary` for the current Whisper public endpoint: it accepts
 long uploads and splits them into model-sized chunks rather than rejecting the
 whole request.
+
+### Whisper CoVoST2 translation validation
+
+`benchmark_whisper_translation.py` evaluates the public translations API and
+a same-revision Transformers reference on the pinned `lmms-lab/covost2`
+`zh_en/test` split. The default full run requires exactly 4,898 samples and
+records the model and dataset revisions, evaluation-input hash, corpus WER,
+optional BLEU/chrF, latency, throughput, audio seconds/s, explicitly attributed
+resources, and per-sample evidence.
+
+Prepare the pinned dataset and run against a translation-capable Whisper
+server:
+
+```bash
+python -m benchmarks.dataset.prepare --dataset covost2-zh-en
+# Set this to the server's GPU worker PID reported by `nvidia-smi`.
+SERVER_HOST_PID=12345
+python -m benchmarks.eval.benchmark_whisper_translation \
+  --backend server --port 8000 --gpu-process-pid "${SERVER_HOST_PID}" \
+  --output results/whisper-covost2-server.json
+```
+
+For the same-revision Hugging Face comparison, stop the server to avoid GPU
+contention and run:
+
+```bash
+python -m benchmarks.eval.benchmark_whisper_translation \
+  --backend transformers --port 8000 \
+  --output results/whisper-covost2-transformers.json
+```
+
+The server backend requires NVML-reported GPU process IDs so unrelated
+workloads cannot contaminate GPU-process metrics. Host CPU/RSS additionally
+requires a visible host PID namespace and otherwise records
+`gpu_process_host_metrics_error`. The Transformers backend attributes the
+current process automatically. `--source-language zh` is the reproducible
+default; pass an empty value to exercise the API's automatic language
+detection. Install FFmpeg/libsndfile MP3 support before the full dataset run.
 
 Both `*_seedtts.py` scripts also support speech quality and similarity evaluation via UTMOS and WavLM speaker verification metrics. Running with `--utmos-only` or `--similarity-only` loads the respective pre-trained predictor and computes scores on the previously generated audio in the output directory without requiring the TTS/ASR servers to be running.
 
