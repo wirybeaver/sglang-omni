@@ -46,7 +46,7 @@ def _stability_args(
         "gpu_index": 0,
         "gpu_process_pids": [123],
         "model_path": model_path,
-        "model_revision": None,
+        "model_revision": EXPECTED_MODEL_REVISIONS[model_path],
         "include_translation": None,
         "translation_source_language": "zh",
         "check_audio_boundary": None,
@@ -84,6 +84,7 @@ async def test_seedtts_repeat_keeps_per_sample_evidence(
                 "throughput_samples_per_s": 0.5,
                 "rtfx": 2.0,
                 "latency_mean_s": 0.2,
+                "latency_median_s": 0.2,
                 "latency_p95_s": 0.2,
                 "latency_p99_s": 0.2,
                 "rtf_mean": 0.05,
@@ -108,12 +109,15 @@ async def test_seedtts_repeat_keeps_per_sample_evidence(
         model_path=FUN_ASR_MODEL_PATH,
         lang="en",
         stream=False,
+        sample_util=False,
+        save_raw_dir=None,
     )
 
     result = await benchmark_asr_seedtts._run_repeat(args, [], 1, 1)
 
     assert result["rtfx"] == 2.0
     assert result["audio_seconds_per_s"] == 2.0
+    assert result["latency_median_s"] == 0.2
     assert result["per_sample"] == per_sample
 
 
@@ -171,7 +175,22 @@ def test_stability_model_defaults_are_capability_specific(
 
     assert args.include_translation is expected_translation
     assert args.check_audio_boundary is expected_boundary
-    assert args.model_revision is None
+    assert args.model_revision == EXPECTED_MODEL_REVISIONS[model_path]
+
+
+@pytest.mark.parametrize("model_revision", [None, "", "   "])
+def test_stability_requires_explicit_model_revision(model_revision: str | None) -> None:
+    args = _stability_args(FUN_ASR_MODEL_PATH, model_revision=model_revision)
+
+    with pytest.raises(ValueError, match="--model-revision"):
+        benchmark_asr_stability._validate_args(args)
+
+
+def test_stability_requires_pinned_model_revision() -> None:
+    args = _stability_args(FUN_ASR_MODEL_PATH, model_revision="main")
+
+    with pytest.raises(ValueError, match="pinned revision"):
+        benchmark_asr_stability._validate_args(args)
 
 
 def test_stability_memory_retention_requires_free_and_cooldown_headroom() -> None:
