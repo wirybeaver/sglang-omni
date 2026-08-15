@@ -46,7 +46,7 @@ def _stability_args(
         "gpu_index": 0,
         "gpu_process_pids": [123],
         "model_path": model_path,
-        "model_revision": None,
+        "model_revision": EXPECTED_MODEL_REVISIONS[model_path],
         "include_translation": None,
         "translation_source_language": "zh",
         "check_audio_boundary": None,
@@ -175,7 +175,22 @@ def test_stability_model_defaults_are_capability_specific(
 
     assert args.include_translation is expected_translation
     assert args.check_audio_boundary is expected_boundary
-    assert args.model_revision is None
+    assert args.model_revision == EXPECTED_MODEL_REVISIONS[model_path]
+
+
+@pytest.mark.parametrize("model_revision", [None, "", "   "])
+def test_stability_requires_explicit_model_revision(model_revision: str | None) -> None:
+    args = _stability_args(FUN_ASR_MODEL_PATH, model_revision=model_revision)
+
+    with pytest.raises(ValueError, match="--model-revision"):
+        benchmark_asr_stability._validate_args(args)
+
+
+def test_stability_requires_pinned_model_revision() -> None:
+    args = _stability_args(FUN_ASR_MODEL_PATH, model_revision="main")
+
+    with pytest.raises(ValueError, match="pinned revision"):
+        benchmark_asr_stability._validate_args(args)
 
 
 def test_stability_memory_retention_requires_free_and_cooldown_headroom() -> None:

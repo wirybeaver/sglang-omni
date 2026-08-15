@@ -219,6 +219,7 @@ def _validate_args(args: argparse.Namespace) -> list[int]:
         if isinstance(args.concurrencies, str)
         else list(args.concurrencies)
     )
+    expected_model_revision = PINNED_MODEL_REVISIONS.get(args.model_path)
     constraints = (
         (
             bool(concurrencies) and all(value > 0 for value in concurrencies),
@@ -268,6 +269,14 @@ def _validate_args(args: argparse.Namespace) -> list[int]:
             and all(pid > 0 for pid in args.gpu_process_pids),
             "at least one positive --gpu-process-pid is required for "
             "fail-closed resource attribution",
+        ),
+        (
+            expected_model_revision is not None,
+            "--model-path must be one of the supported consumer ASR models",
+        ),
+        (
+            args.model_revision == expected_model_revision,
+            "--model-revision must match the pinned revision for --model-path",
         ),
         (
             not _is_local_source(args.meta),
