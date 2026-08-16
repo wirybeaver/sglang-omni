@@ -184,8 +184,9 @@ def parse_args() -> argparse.Namespace:
         type=_positive_int,
         action="append",
         help=(
-            "NVML/host PID to include in process memory, RSS, and CPU metrics; "
-            "repeat for multiple GPU processes. Use the host PID namespace."
+            "NVML PID to include in GPU-process memory metrics; repeat for "
+            "multiple GPU processes. Host CPU/RSS additionally requires the "
+            "host PID namespace and is reported as unavailable when hidden."
         ),
     )
     parser.add_argument("--chaos-interval-s", type=_positive_float, default=30.0)

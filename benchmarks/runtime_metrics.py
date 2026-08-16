@@ -91,6 +91,7 @@ class ResourceMonitor:
             if self._thread.is_alive() and self.error is None:
                 self.error = "resource sampler did not stop before timeout"
         process_error = None
+        host_process_error = None
         if not self.gpu_process_pids:
             process_error = (
                 "GPU process metrics require at least one explicit NVML PID; "
@@ -106,7 +107,7 @@ class ResourceMonitor:
             )
         elif self._inaccessible_process_pids:
             pids = ", ".join(map(str, sorted(self._inaccessible_process_pids)))
-            process_error = (
+            host_process_error = (
                 f"GPU process CPU/RSS metrics unavailable for NVML PID(s) {pids}; "
                 "use the host PID namespace (for Docker, --pid=host)"
             )
@@ -114,6 +115,7 @@ class ResourceMonitor:
             list(self.samples),
             interval_s=self.interval_s,
             error=self.error or process_error,
+            gpu_process_host_metrics_error=host_process_error,
         )
 
     def _run(self) -> None:
@@ -250,18 +252,22 @@ def summarize_resource_samples(
     *,
     interval_s: float,
     error: str | None = None,
+    gpu_process_host_metrics_error: str | None = None,
 ) -> dict[str, Any]:
     if not samples:
-        return {
+        result = {
             "available": False,
             "sample_interval_s": interval_s,
             "samples": 0,
             "error": error,
         }
+        if gpu_process_host_metrics_error is not None:
+            result["gpu_process_host_metrics_error"] = gpu_process_host_metrics_error
+        return result
 
     steady_count = max(1, min(len(samples), round(5.0 / interval_s)))
     steady = samples[-steady_count:]
-    return {
+    result = {
         "available": True,
         "sample_interval_s": interval_s,
         "samples": len(samples),
@@ -295,6 +301,9 @@ def summarize_resource_samples(
         ),
         "error": error,
     }
+    if gpu_process_host_metrics_error is not None:
+        result["gpu_process_host_metrics_error"] = gpu_process_host_metrics_error
+    return result
 
 
 def collect_benchmark_provenance(
