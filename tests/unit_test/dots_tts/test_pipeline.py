@@ -189,3 +189,29 @@ def test_dots_tts_rejects_tp() -> None:
     stage["gpu"] = [0, 1]
     with pytest.raises(ValueError, match="tp_size=1"):
         DotsTTSPipelineConfig(**raw)
+
+
+def test_dots_tts_engine_allows_breakable_prefill_with_effective_token_ladder() -> None:
+    from sglang_omni.models.dots_tts.engine_builder import DotsTTSEngineBuilder
+    from sglang_omni.scheduling.generation_batch_policy import (
+        build_default_prefill_cuda_graph_bs,
+        build_generation_batch_overrides,
+    )
+
+    builder = DotsTTSEngineBuilder()
+    overrides = build_generation_batch_overrides(
+        server_args_overrides={
+            "disable_cuda_graph": False,
+            "cuda_graph_backend_prefill": "breakable",
+            "max_prefill_tokens": 1024,
+        },
+        **builder.generation_defaults(dtype="bfloat16"),
+    )
+
+    builder.adjust_overrides(overrides)
+
+    assert builder.supports_breakable_prefill_cuda_graph is True
+    assert overrides["cuda_graph_bs_prefill"] == (
+        build_default_prefill_cuda_graph_bs(1024)
+    )
+    assert overrides["cuda_graph_max_bs_prefill"] == 1024

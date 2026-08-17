@@ -103,6 +103,12 @@ def _forward_model(hidden: torch.Tensor) -> DotsTTSSGLangModel:
     return model
 
 
+def test_prefill_graph_discovers_qwen2_language_model() -> None:
+    model = _forward_model(torch.zeros(1, 2))
+
+    assert model.language_model is model.qwen2
+
+
 def test_forward_prefill_skips_lm_head_and_keeps_full_hidden_rows() -> None:
     hidden = torch.arange(12.0).reshape(6, 2)
     model = _forward_model(hidden)
