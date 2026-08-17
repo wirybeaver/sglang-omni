@@ -232,6 +232,11 @@ consistency, cancel/reconnect recovery, malformed-audio fault injection, staged
 load and `/health`. With explicit `--include-translation`, Whisper also mixes
 speech-to-English translation into Chinese traffic.
 
+Cancel/reconnect follows the served model's streaming contract. Token-streaming
+models are disconnected after the first non-empty text delta. Whisper currently
+emits terminal-only text, so its request is disconnected while the first event
+is still pending and then followed by a fresh streaming request.
+
 Prepare the canonical bilingual SeedTTS dataset, then start the server in one
 terminal:
 

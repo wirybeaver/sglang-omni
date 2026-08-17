@@ -443,6 +443,7 @@ async def test_stability_cancel_stream_is_python_310_compatible(
     )
 
     assert result["received_event"] is True
+    assert result["cancelled"] is True
     assert response.closed is True
 
 
@@ -488,7 +489,54 @@ async def test_stability_cancel_stream_rejects_terminal_first_response() -> None
     )
 
     assert result["received_event"] is False
+    assert result["cancelled"] is False
     assert response.closed is True
+
+
+@pytest.mark.asyncio
+async def test_stability_whisper_cancels_before_terminal_only_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    class FakeSession:
+        async def post(self, *_args, **_kwargs):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                stopped.set()
+
+    monkeypatch.setattr(
+        benchmark_asr_stability,
+        "PREHEADER_CANCEL_DELAY_S",
+        0.0,
+    )
+    args = SimpleNamespace(
+        host="127.0.0.1",
+        port=8000,
+        model_path=OMNI_WHISPER_MODEL_PATH,
+        request_timeout_s=1.0,
+    )
+    sample = benchmark_asr_stability.PreparedSample(
+        sample_id="sample",
+        language="en",
+        audio_bytes=b"RIFF",
+        duration_s=1.0,
+    )
+
+    result = await benchmark_asr_stability._cancel_stream(
+        FakeSession(),
+        args,
+        sample,
+    )
+
+    assert started.is_set()
+    assert stopped.is_set()
+    assert result["strategy"] == "before_first_event"
+    assert result["cancelled"] is True
+    assert result["received_event"] is False
 
 
 @pytest.mark.asyncio
@@ -753,7 +801,13 @@ async def test_stability_soak_bounds_total_concurrency_and_global_cadence(
 
     async def cancel_request(*_args):
         await pulse()
-        return {"status": 200, "received_event": True, "error": None}
+        return {
+            "status": 200,
+            "strategy": "after_first_delta",
+            "cancelled": True,
+            "received_event": True,
+            "error": None,
+        }
 
     async def reconnect_request(*_args):
         await pulse()
