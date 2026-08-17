@@ -324,9 +324,16 @@ def _build_result(
         if result["status"] == 200
     )
     quality = _translation_quality(references, hypotheses)
+    resource_attribution_passed = args.backend != "server" or (
+        resources.get("available") is True and resources.get("error") is None
+    )
     return {
         "schema_version": 1,
-        "passed": len(successful) == len(samples) and all(hypotheses),
+        "passed": (
+            len(successful) == len(samples)
+            and all(hypotheses)
+            and resource_attribution_passed
+        ),
         "provenance": collect_benchmark_provenance(
             model_id=args.model_path,
             model_revision=args.model_revision,

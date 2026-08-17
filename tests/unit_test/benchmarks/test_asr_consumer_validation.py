@@ -38,6 +38,61 @@ def test_translation_server_requires_explicit_gpu_process_targets() -> None:
         benchmark_whisper_translation._validate_args(args)
 
 
+def test_translation_server_fails_when_gpu_process_attribution_fails() -> None:
+    args = SimpleNamespace(
+        backend="server",
+        model_path=OMNI_WHISPER_MODEL_PATH,
+        model_revision=benchmark_whisper_translation.MODEL_REVISION,
+        dataset_id="lmms-lab/covost2",
+        dataset_config=benchmark_whisper_translation.DATASET_CONFIG,
+        dataset_split=benchmark_whisper_translation.DATASET_SPLIT,
+        dataset_revision=benchmark_whisper_translation.DATASET_REVISION,
+        launch_command=None,
+        dtype="bfloat16",
+        attention_backend="flashinfer",
+        cuda_graph=True,
+        torch_compile=False,
+        max_running_requests=16,
+        mem_fraction_static=0.65,
+        concurrency=1,
+        warmup_samples=0,
+        source_language="zh",
+        gpu_process_pids=[42],
+    )
+    samples = [
+        benchmark_whisper_translation.TranslationSample(
+            sample_id="sample",
+            audio_bytes=b"mp3",
+            filename="sample.mp3",
+            reference="hello",
+            duration_s=1.0,
+        )
+    ]
+    results = [
+        {
+            "status": 200,
+            "text": "hello",
+            "latency_s": 0.1,
+            "error": None,
+        }
+    ]
+    resources = {
+        "available": True,
+        "samples": 1,
+        "error": "target NVML PID(s) 42 were not observed on GPU 0",
+    }
+
+    result = benchmark_whisper_translation._build_result(
+        args,
+        samples,
+        results,
+        wall_clock_s=0.1,
+        resources=resources,
+    )
+
+    assert result["passed"] is False
+
+
 def test_translation_quality_reports_exact_match() -> None:
     result = benchmark_whisper_translation._translation_quality(
         ["this is an exact translation match"],
