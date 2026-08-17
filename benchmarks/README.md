@@ -274,12 +274,15 @@ returned text must be predominantly Latin rather than untranslated Chinese.
 Every stage must complete normal requests and at least one chaos event, and
 translation stages must complete translation traffic, or the result fails.
 
-The memory gate requires working NVML and `psutil` sampling. It records
-device-wide used/free memory, GPU-process allocation, the host RSS and CPU use
-of the explicitly selected GPU process IDs, utilization, and power. Pass each
-server process with `--gpu-process-pid`; when the server runs in Docker, expose
-the host PID namespace (for example, `--pid=host`) and pass host-visible PIDs.
-Missing or un-attributable samples fail closed.
+The memory gate requires working NVML and explicitly selected GPU process IDs.
+It records device-wide used/free memory, GPU-process allocation, utilization,
+and power. Pass each NVML-reported server process with `--gpu-process-pid`;
+missing or un-attributable NVML samples fail closed. Host CPU and RSS sampling
+also uses `psutil`. When the server runs in Docker, expose the host PID
+namespace (for example, `--pid=host`) to collect those host-process metrics. A
+provider-managed direct container may not expose that namespace; in that case
+valid NVML attribution and the GPU-memory gate remain available, while the
+result records the limitation in `gpu_process_host_metrics_error`.
 `--min-free-memory-mib` applies to the minimum observed free device memory;
 `--max-retained-memory-mib` compares the post-cooldown device allocation with
 the pre-functional checkpoint. Use `--cooldown-s` to match the deployment's

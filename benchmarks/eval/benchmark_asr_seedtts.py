@@ -590,9 +590,9 @@ def parse_args() -> argparse.Namespace:
         type=_positive_int,
         action="append",
         help=(
-            "NVML/host PID to include in process memory and CPU metrics; repeat "
-            "for multiple GPU processes. Without this option, process-specific "
-            "metrics are unavailable instead of including every GPU workload."
+            "NVML PID to include in GPU-process memory metrics; repeat for "
+            "multiple GPU processes. Host CPU/RSS additionally requires a "
+            "visible host PID namespace and is otherwise reported unavailable."
         ),
     )
     parser.add_argument(

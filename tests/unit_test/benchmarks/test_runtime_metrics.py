@@ -141,7 +141,7 @@ def test_resource_monitor_requires_explicit_gpu_process_targets() -> None:
     assert "--gpu-process-pid" in result["error"]
 
 
-def test_resource_monitor_filters_targets_and_reports_pid_namespace() -> None:
+def test_resource_monitor_preserves_nvml_metrics_without_host_pid_namespace() -> None:
     class NoSuchProcess(Exception):
         pass
 
@@ -173,7 +173,8 @@ def test_resource_monitor_filters_targets_and_reports_pid_namespace() -> None:
     assert monitor.samples[0].gpu_process_memory_mib == 2.0
     assert monitor.samples[0].gpu_process_cpu_percent is None
     assert monitor.samples[0].gpu_process_pids == (22,)
-    assert "--pid=host" in result["error"]
+    assert result["error"] is None
+    assert "--pid=host" in result["gpu_process_host_metrics_error"]
 
 
 @pytest.mark.parametrize(
