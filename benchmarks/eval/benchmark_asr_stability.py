@@ -50,6 +50,8 @@ PINNED_MODEL_REVISIONS = PINNED_ASR_MODEL_REVISIONS
 MAX_SSE_LINE_BYTES = 1024 * 1024
 MAX_SSE_EVENTS = 100_000
 LATENCY_RESERVOIR_SIZE = 8192
+PREHEADER_CANCEL_MODELS = {OMNI_WHISPER_MODEL_PATH}
+PREHEADER_CANCEL_DELAY_S = 0.05
 
 
 @dataclass(frozen=True)
@@ -528,8 +530,7 @@ async def _run_functional_checks(
         {
             "name": "stream_cancel_and_reconnect",
             "passed": (
-                cancellation["status"] == 200
-                and cancellation["received_event"]
+                cancellation["cancelled"]
                 and reconnect["status"] == 200
                 and reconnect["done"]
             ),
@@ -750,9 +751,9 @@ async def _run_soak(
                             "stage_concurrency": concurrency,
                             "kind": "cancel_reconnect",
                             "status": cancel["status"],
+                            "cancel_strategy": cancel["strategy"],
                             "passed": (
-                                cancel["status"] == 200
-                                and cancel["received_event"]
+                                cancel["cancelled"]
                                 and reconnect["status"] == 200
                                 and reconnect["done"]
                             ),
@@ -1007,6 +1008,9 @@ async def _cancel_stream(
     args: argparse.Namespace,
     sample: PreparedSample,
 ) -> dict[str, Any]:
+    if args.model_path in PREHEADER_CANCEL_MODELS:
+        return await _cancel_stream_before_headers(session, args, sample)
+
     response: aiohttp.ClientResponse | None = None
     status = 0
     received_event = False
@@ -1035,8 +1039,66 @@ async def _cancel_stream(
             response.close()
     return {
         "status": status,
+        "strategy": "after_first_delta",
+        "cancelled": status == 200 and received_event,
         "received_event": received_event,
         "response_bytes": bytes_read,
+        "error": error,
+    }
+
+
+async def _cancel_stream_before_headers(
+    session: aiohttp.ClientSession,
+    args: argparse.Namespace,
+    sample: PreparedSample,
+) -> dict[str, Any]:
+    """Disconnect terminal-only streams while the first result is pending."""
+
+    response: aiohttp.ClientResponse | None = None
+    status = 0
+    error: str | None = None
+
+    async def post_stream() -> aiohttp.ClientResponse:
+        return await session.post(
+            _url(args),
+            data=_stream_form(args, sample),
+            headers=STREAM_ROUTE_HEADERS,
+        )
+
+    request_task = asyncio.create_task(post_stream())
+    try:
+        await asyncio.sleep(PREHEADER_CANCEL_DELAY_S)
+        if request_task.done():
+            response = request_task.result()
+            status = response.status
+            error = "response completed before the pre-header cancellation"
+            cancelled = False
+        else:
+            request_task.cancel()
+            outcomes = await asyncio.gather(request_task, return_exceptions=True)
+            outcome = outcomes[0]
+            cancelled = isinstance(outcome, asyncio.CancelledError)
+            if not cancelled and isinstance(outcome, BaseException):
+                error = f"{type(outcome).__name__}: {outcome}"
+            elif not cancelled:
+                response = outcome
+                status = response.status
+                error = "response completed before the pre-header cancellation"
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+        cancelled = False
+        error = f"{type(exc).__name__}: {exc}"
+    finally:
+        if not request_task.done():
+            request_task.cancel()
+            await asyncio.gather(request_task, return_exceptions=True)
+        if response is not None:
+            response.close()
+    return {
+        "status": status,
+        "strategy": "before_first_event",
+        "cancelled": cancelled,
+        "received_event": False,
+        "response_bytes": 0,
         "error": error,
     }
 
