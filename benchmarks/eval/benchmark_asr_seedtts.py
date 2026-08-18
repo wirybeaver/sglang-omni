@@ -116,6 +116,20 @@ DEFAULT_CONCURRENCIES = "1,2,4,8,16,32,64"
 PINNED_MODEL_REVISIONS = PINNED_ASR_MODEL_REVISIONS
 
 
+def resolve_model_revision(
+    model_path: str,
+    declared_revision: str | None,
+) -> str:
+    expected_revision = PINNED_MODEL_REVISIONS.get(model_path)
+    if expected_revision is None:
+        raise ValueError("--model-path must be a supported consumer ASR model")
+    if declared_revision not in (None, expected_revision):
+        raise ValueError(
+            "--model-revision must match the pinned revision for --model-path"
+        )
+    return expected_revision
+
+
 def _positive_int(value: str) -> int:
     try:
         parsed = int(value)
@@ -754,7 +768,7 @@ def main() -> None:
     args = parse_args()
     concurrencies = args.concurrencies
     max_samples = args.max_samples if args.max_samples > 0 else None
-    model_revision = args.model_revision
+    model_revision = resolve_model_revision(args.model_path, args.model_revision)
     is_local_source = os.path.isfile(args.meta) or args.meta.endswith(".lst")
     if is_local_source:
         dataset_revision = None

@@ -28,6 +28,18 @@ def test_consumer_model_revision_table_is_exact() -> None:
     assert benchmark_asr_seedtts.PINNED_MODEL_REVISIONS == EXPECTED_MODEL_REVISIONS
 
 
+@pytest.mark.parametrize("model_path", EXPECTED_MODEL_REVISIONS)
+def test_seedtts_uses_the_pinned_model_revision_by_default(model_path: str) -> None:
+    assert benchmark_asr_seedtts.resolve_model_revision(model_path, None) == (
+        EXPECTED_MODEL_REVISIONS[model_path]
+    )
+
+
+def test_seedtts_rejects_a_nonpinned_model_revision() -> None:
+    with pytest.raises(ValueError, match="pinned revision"):
+        benchmark_asr_seedtts.resolve_model_revision(FUN_ASR_MODEL_PATH, "main")
+
+
 def _stability_args(
     model_path: str,
     **overrides,
