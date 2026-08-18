@@ -116,7 +116,7 @@ def test_load_seedtts_samples_accepts_local_meta_lst(tmp_path: Path) -> None:
     assert samples[0].target_text == "target one"
 
 
-def test_local_seedtts_source_does_not_claim_huggingface_revision(
+def test_local_seedtts_source_keeps_only_the_pinned_model_revision(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -155,7 +155,11 @@ def test_local_seedtts_source_does_not_claim_huggingface_revision(
 
     benchmark_asr_seedtts.main()
     assert captured["dataset_revision"] is None
-    assert captured["model_revision"] is None
+    assert captured["model_revision"] == (
+        benchmark_asr_seedtts.PINNED_MODEL_REVISIONS[
+            benchmark_asr_seedtts.QWEN3_ASR_MODEL_PATH
+        ]
+    )
     assert captured["server_config"]["quantization"] is None
 
 
