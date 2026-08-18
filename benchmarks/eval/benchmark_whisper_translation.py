@@ -130,6 +130,30 @@ def parse_args() -> argparse.Namespace:
 
 def _validate_args(args: argparse.Namespace) -> None:
     constraints = (
+        (
+            args.model_path == OMNI_WHISPER_MODEL_PATH,
+            "--model-path must match the pinned Whisper model",
+        ),
+        (
+            args.model_revision == MODEL_REVISION,
+            "--model-revision must match the pinned Whisper revision",
+        ),
+        (
+            args.dataset_id == DATASET_ID,
+            "--dataset-id must match the pinned CoVoST2 dataset",
+        ),
+        (
+            args.dataset_config == DATASET_CONFIG,
+            "--dataset-config must match the pinned CoVoST2 config",
+        ),
+        (
+            args.dataset_split == DATASET_SPLIT,
+            "--dataset-split must match the pinned CoVoST2 split",
+        ),
+        (
+            args.dataset_revision == DATASET_REVISION,
+            "--dataset-revision must match the pinned CoVoST2 revision",
+        ),
         (args.concurrency > 0, "--concurrency must be greater than zero"),
         (args.warmup_samples >= 0, "--warmup-samples must be nonnegative"),
         (args.max_samples >= 0, "--max-samples must be nonnegative"),

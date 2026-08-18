@@ -22,19 +22,52 @@ def test_translation_benchmark_revisions_are_exact() -> None:
     assert benchmark_whisper_translation.DATASET_SPLIT == "test"
 
 
+def _translation_validation_args(**overrides) -> SimpleNamespace:
+    values = {
+        "backend": "server",
+        "model_path": OMNI_WHISPER_MODEL_PATH,
+        "model_revision": benchmark_whisper_translation.MODEL_REVISION,
+        "dataset_id": benchmark_whisper_translation.DATASET_ID,
+        "dataset_config": benchmark_whisper_translation.DATASET_CONFIG,
+        "dataset_split": benchmark_whisper_translation.DATASET_SPLIT,
+        "dataset_revision": benchmark_whisper_translation.DATASET_REVISION,
+        "concurrency": 8,
+        "warmup_samples": 1,
+        "max_samples": 1,
+        "request_timeout_s": 120.0,
+        "monitor_interval_s": 0.2,
+        "gpu_index": 0,
+        "gpu_process_pids": [42],
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
 def test_translation_server_requires_explicit_gpu_process_targets() -> None:
-    args = SimpleNamespace(
-        backend="server",
-        concurrency=8,
-        warmup_samples=1,
-        max_samples=1,
-        request_timeout_s=120.0,
-        monitor_interval_s=0.2,
-        gpu_index=0,
-        gpu_process_pids=None,
-    )
+    args = _translation_validation_args(gpu_process_pids=None)
 
     with pytest.raises(ValueError, match="--gpu-process-pid"):
+        benchmark_whisper_translation._validate_args(args)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("model_path", "other/whisper"),
+        ("model_revision", "main"),
+        ("dataset_id", "other/covost2"),
+        ("dataset_config", "en_de"),
+        ("dataset_split", "validation"),
+        ("dataset_revision", "main"),
+    ],
+)
+def test_translation_benchmark_rejects_nonpinned_inputs(
+    field: str,
+    value: str,
+) -> None:
+    args = _translation_validation_args(**{field: value})
+
+    with pytest.raises(ValueError, match="pinned"):
         benchmark_whisper_translation._validate_args(args)
 
 
