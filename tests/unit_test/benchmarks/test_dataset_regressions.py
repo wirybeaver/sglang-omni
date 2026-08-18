@@ -120,6 +120,7 @@ def test_local_seedtts_source_keeps_only_the_pinned_model_revision(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """Keep the pinned model revision while clearing local-dataset provenance."""
     meta_path = tmp_path / "meta.lst"
     meta_path.write_text("sample-1|hello|ref.wav|target one\n")
     (tmp_path / "ref.wav").write_bytes(b"audio")
