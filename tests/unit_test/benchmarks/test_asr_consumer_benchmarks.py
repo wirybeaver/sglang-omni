@@ -206,6 +206,7 @@ def test_stability_requires_pinned_model_revision() -> None:
 
 
 def test_stability_memory_retention_requires_free_and_cooldown_headroom() -> None:
+    """Require both steady-state free memory and post-cooldown retention headroom."""
     checkpoints = [
         {
             "label": "before_functional",
@@ -357,6 +358,7 @@ def test_stability_translation_requires_english_output() -> None:
 
 @pytest.mark.asyncio
 async def test_stability_stream_uses_route_header_and_terminal_contract() -> None:
+    """Send the streaming route header and require a complete terminal sequence."""
     captured: dict = {}
 
     async def content():
@@ -411,6 +413,8 @@ async def test_stability_stream_uses_route_header_and_terminal_contract() -> Non
 async def test_stability_cancel_stream_is_python_310_compatible(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Keep stream cancellation working when asyncio.timeout is unavailable."""
+
     async def content():
         yield b'data: {"type":"transcript.text.delta","delta":"hi"}\n'
 
@@ -461,6 +465,8 @@ async def test_stability_cancel_stream_is_python_310_compatible(
 
 @pytest.mark.asyncio
 async def test_stability_cancel_stream_rejects_terminal_first_response() -> None:
+    """Reject cancellation evidence when a terminal event precedes any delta."""
+
     async def content():
         yield b'data: {"type":"transcript.text.done","text":"complete"}\n'
         yield b"data: [DONE]\n"
@@ -509,6 +515,7 @@ async def test_stability_cancel_stream_rejects_terminal_first_response() -> None
 async def test_stability_whisper_cancels_before_terminal_only_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Cancel terminal-only Whisper requests before their first response event."""
     started = asyncio.Event()
     stopped = asyncio.Event()
 
@@ -555,6 +562,7 @@ async def test_stability_whisper_cancels_before_terminal_only_response(
 async def test_stability_stops_resource_monitor_when_functional_phase_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Stop the resource monitor when functional validation raises."""
     stopped = False
     monitor_kwargs: dict[str, object] = {}
 
@@ -791,6 +799,7 @@ def test_stability_sse_caps_line_and_cumulative_bytes() -> None:
 async def test_stability_soak_bounds_total_concurrency_and_global_cadence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Share one concurrency bound and chaos cadence across the soak stage."""
     active = 0
     max_active = 0
 
@@ -894,6 +903,7 @@ async def test_stability_soak_bounds_total_concurrency_and_global_cadence(
 async def test_stability_soak_cancellation_cleans_up_all_child_tasks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Cancel every request task when the parent soak task is cancelled."""
     started = asyncio.Event()
     active = 0
 
