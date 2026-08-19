@@ -61,7 +61,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="0.1.2" />
-    <meta name="docbuild:last-update" content="Aug 17, 2026"/>
+    <meta name="docbuild:last-update" content="Aug 19, 2026"/>
   
     
     <script src="../_static/searchtools.js"></script>
@@ -583,12 +583,12 @@ same surface.</p>
 <p>Scheduler messages are used to communicate with stage layer:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">IncomingMessage</span><span class="p">:</span>
     <span class="n">request_id</span><span class="p">:</span> <span class="nb">str</span>
-    <span class="nb">type</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;new_request&quot;</span><span class="p">,</span> <span class="s2">&quot;stream_chunk&quot;</span><span class="p">,</span> <span class="s2">&quot;stream_done&quot;</span><span class="p">]</span>
+    <span class="nb">type</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"new_request"</span><span class="p">,</span> <span class="s2">"stream_chunk"</span><span class="p">,</span> <span class="s2">"stream_done"</span><span class="p">]</span>
     <span class="n">data</span><span class="p">:</span> <span class="n">Any</span>
 
 <span class="k">class</span><span class="w"> </span><span class="nc">OutgoingMessage</span><span class="p">:</span>
     <span class="n">request_id</span><span class="p">:</span> <span class="nb">str</span>
-    <span class="nb">type</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;result&quot;</span><span class="p">,</span> <span class="s2">&quot;stream&quot;</span><span class="p">,</span> <span class="s2">&quot;error&quot;</span><span class="p">]</span>
+    <span class="nb">type</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"result"</span><span class="p">,</span> <span class="s2">"stream"</span><span class="p">,</span> <span class="s2">"error"</span><span class="p">]</span>
     <span class="n">data</span><span class="p">:</span> <span class="n">Any</span>
     <span class="n">target</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span>
     <span class="n">metadata</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span>
@@ -758,7 +758,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Aug 17, 2026.
+  Last updated on Aug 19, 2026.
   <br/>
 </p>
   </div>
