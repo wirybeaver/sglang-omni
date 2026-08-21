@@ -116,10 +116,11 @@ def test_load_seedtts_samples_accepts_local_meta_lst(tmp_path: Path) -> None:
     assert samples[0].target_text == "target one"
 
 
-def test_local_seedtts_source_does_not_claim_huggingface_revision(
+def test_local_seedtts_source_keeps_only_the_pinned_model_revision(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """Keep the pinned model revision while clearing local-dataset provenance."""
     meta_path = tmp_path / "meta.lst"
     meta_path.write_text("sample-1|hello|ref.wav|target one\n")
     (tmp_path / "ref.wav").write_bytes(b"audio")
@@ -155,7 +156,11 @@ def test_local_seedtts_source_does_not_claim_huggingface_revision(
 
     benchmark_asr_seedtts.main()
     assert captured["dataset_revision"] is None
-    assert captured["model_revision"] is None
+    assert captured["model_revision"] == (
+        benchmark_asr_seedtts.PINNED_MODEL_REVISIONS[
+            benchmark_asr_seedtts.QWEN3_ASR_MODEL_PATH
+        ]
+    )
     assert captured["server_config"]["quantization"] is None
 
 

@@ -6,7 +6,7 @@
 
 This script transcribes SeedTTS reference clips directly through a running ASR
 router and reports WER, request throughput, RTFx, RTF, latency, and worker
-routing balance. It supports both Qwen3-ASR and Fun-ASR-Nano through
+routing balance. It supports Qwen3-ASR, Fun-ASR-Nano, and Whisper through
 ``--model-path``.
 
 Usage:
@@ -87,6 +87,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import math
 import os
 import statistics
 import time
@@ -104,12 +105,29 @@ from benchmarks.eval.asr_profiling import (
 from benchmarks.runtime_metrics import ResourceMonitor, collect_benchmark_provenance
 from benchmarks.tasks.asr import (
     FUN_ASR_MODEL_PATH,
+    OMNI_WHISPER_MODEL_PATH,
+    PINNED_ASR_MODEL_REVISIONS,
     QWEN3_ASR_MODEL_PATH,
     build_asr_eval_results,
     run_asr_transcription,
 )
 
 DEFAULT_CONCURRENCIES = "1,2,4,8,16,32,64"
+PINNED_MODEL_REVISIONS = PINNED_ASR_MODEL_REVISIONS
+
+
+def resolve_model_revision(
+    model_path: str,
+    declared_revision: str | None,
+) -> str:
+    expected_revision = PINNED_MODEL_REVISIONS.get(model_path)
+    if expected_revision is None:
+        raise ValueError("--model-path must be a supported consumer ASR model")
+    if declared_revision not in (None, expected_revision):
+        raise ValueError(
+            "--model-revision must match the pinned revision for --model-path"
+        )
+    return expected_revision
 
 
 def _positive_int(value: str) -> int:
@@ -119,6 +137,16 @@ def _positive_int(value: str) -> int:
         raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}") from exc
     if parsed <= 0:
         raise argparse.ArgumentTypeError("value must be greater than zero")
+    return parsed
+
+
+def _positive_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected a number, got {value!r}") from exc
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("value must be finite and greater than zero")
     return parsed
 
 
@@ -286,6 +314,7 @@ async def _run_repeat(args, samples, concurrency: int, repeat: int) -> dict:
         "wall_clock_s": benchmark_result["wall_clock_s"],
         "throughput_samples_per_s": speed["throughput_samples_per_s"],
         "rtfx": speed["rtfx"],
+        "audio_seconds_per_s": speed["rtfx"],
         "latency_mean_s": (speed["latency_mean_s"] if has_evaluated_samples else None),
         "latency_median_s": (
             speed["latency_median_s"] if has_evaluated_samples else None
@@ -295,6 +324,7 @@ async def _run_repeat(args, samples, concurrency: int, repeat: int) -> dict:
         "rtf_mean": speed["rtf_mean"] if has_rtf else None,
         "rtf_p95": speed["rtf_p95"],
         "worker": benchmark_result["worker"],
+        "per_sample": benchmark_result["per_sample"],
         "resources": resources,
     }
     if util_summary is not None:
@@ -371,6 +401,7 @@ def _aggregate(repeats: list[dict]) -> dict:
         "wall_clock_s": _stat("wall_clock_s"),
         "throughput_samples_per_s": _stat("throughput_samples_per_s"),
         "rtfx": _stat("rtfx"),
+        "audio_seconds_per_s": _stat("audio_seconds_per_s"),
         "latency_mean_s": _stat("latency_mean_s"),
         "latency_median_s": _stat("latency_median_s"),
         "latency_p95_s": _stat("latency_p95_s"),
@@ -492,8 +523,8 @@ def parse_args() -> argparse.Namespace:
         default=QWEN3_ASR_MODEL_PATH,
         help=(
             "ASR model id served by the router. Defaults to "
-            f"{QWEN3_ASR_MODEL_PATH}; use "
-            f"{FUN_ASR_MODEL_PATH} for Fun-ASR-Nano."
+            f"{QWEN3_ASR_MODEL_PATH}; other supported consumer models are "
+            f"{FUN_ASR_MODEL_PATH} and {OMNI_WHISPER_MODEL_PATH}."
         ),
     )
     parser.add_argument(
@@ -563,7 +594,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--monitor-interval-s",
-        type=float,
+        type=_positive_float,
         default=0.2,
         help="Resource monitor sampling interval.",
     )
@@ -573,9 +604,9 @@ def parse_args() -> argparse.Namespace:
         type=_positive_int,
         action="append",
         help=(
-            "NVML/host PID to include in process memory and CPU metrics; repeat "
-            "for multiple GPU processes. Without this option, process-specific "
-            "metrics are unavailable instead of including every GPU workload."
+            "NVML PID to include in GPU-process memory metrics; repeat for "
+            "multiple GPU processes. Host CPU/RSS additionally requires a "
+            "visible host PID namespace and is otherwise reported unavailable."
         ),
     )
     parser.add_argument(
@@ -737,7 +768,7 @@ def main() -> None:
     args = parse_args()
     concurrencies = args.concurrencies
     max_samples = args.max_samples if args.max_samples > 0 else None
-    model_revision = args.model_revision
+    model_revision = resolve_model_revision(args.model_path, args.model_revision)
     is_local_source = os.path.isfile(args.meta) or args.meta.endswith(".lst")
     if is_local_source:
         dataset_revision = None

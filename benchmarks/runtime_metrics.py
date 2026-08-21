@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
+import math
 import os
 import platform
 import subprocess
@@ -25,6 +26,7 @@ class ResourceSample:
     gpu_memory_used_mib: float
     gpu_memory_free_mib: float
     gpu_process_memory_mib: float | None
+    gpu_process_rss_mib: float | None
     gpu_util_percent: float | None
     power_w: float | None
     system_cpu_percent: float | None
@@ -43,8 +45,8 @@ class ResourceMonitor:
     ) -> None:
         if gpu_index < 0:
             raise ValueError("gpu_index must be >= 0")
-        if interval_s <= 0:
-            raise ValueError("interval_s must be > 0")
+        if not math.isfinite(interval_s) or interval_s <= 0:
+            raise ValueError("interval_s must be finite and > 0")
         if any(pid <= 0 for pid in gpu_process_pids or []):
             raise ValueError("gpu_process_pids must contain only positive PIDs")
         self.gpu_index = gpu_index
@@ -89,6 +91,7 @@ class ResourceMonitor:
             if self._thread.is_alive() and self.error is None:
                 self.error = "resource sampler did not stop before timeout"
         process_error = None
+        host_process_error = None
         if not self.gpu_process_pids:
             process_error = (
                 "GPU process metrics require at least one explicit NVML PID; "
@@ -104,14 +107,15 @@ class ResourceMonitor:
             )
         elif self._inaccessible_process_pids:
             pids = ", ".join(map(str, sorted(self._inaccessible_process_pids)))
-            process_error = (
-                f"GPU process CPU metrics unavailable for NVML PID(s) {pids}; "
+            host_process_error = (
+                f"GPU process CPU/RSS metrics unavailable for NVML PID(s) {pids}; "
                 "use the host PID namespace (for Docker, --pid=host)"
             )
         return summarize_resource_samples(
             list(self.samples),
             interval_s=self.interval_s,
             error=self.error or process_error,
+            gpu_process_host_metrics_error=host_process_error,
         )
 
     def _run(self) -> None:
@@ -177,10 +181,10 @@ class ResourceMonitor:
             system_cpu = _best_effort(
                 lambda: float(self._psutil.cpu_percent(interval=None))
             )
-            process_cpu = (
-                self._gpu_process_cpu_percent(process_pids)
+            process_cpu, process_rss_mib = (
+                self._gpu_process_host_metrics(process_pids)
                 if nvml_processes is not None
-                else None
+                else (None, None)
             )
             process_memory_mib = (
                 float(process_memory_bytes) / (1024**2)
@@ -193,6 +197,7 @@ class ResourceMonitor:
                     gpu_memory_used_mib=float(memory.used) / (1024**2),
                     gpu_memory_free_mib=float(memory.free) / (1024**2),
                     gpu_process_memory_mib=process_memory_mib,
+                    gpu_process_rss_mib=process_rss_mib,
                     gpu_util_percent=utilization,
                     power_w=power_w,
                     system_cpu_percent=system_cpu,
@@ -204,23 +209,32 @@ class ResourceMonitor:
             if self.error is None:
                 self.error = f"{type(exc).__name__}: {exc}"
 
-    def _gpu_process_cpu_percent(self, pids: set[int]) -> float | None:
+    def _gpu_process_host_metrics(
+        self,
+        pids: set[int],
+    ) -> tuple[float | None, float | None]:
         if self._psutil is None:
-            return None
-        total = 0.0
-        observed = False
+            return None, None
+        cpu_total = 0.0
+        rss_total_bytes = 0
+        cpu_observed = False
+        rss_observed = False
         for pid in pids:
             try:
                 process = self._processes.get(pid)
                 if process is None:
                     process = self._psutil.Process(pid)
                     self._processes[pid] = process
-                total += float(process.cpu_percent(interval=None))
-                observed = True
+                cpu_total += float(process.cpu_percent(interval=None))
+                cpu_observed = True
+                rss_total_bytes += int(process.memory_info().rss)
+                rss_observed = True
             except (self._psutil.NoSuchProcess, self._psutil.AccessDenied):
                 self._processes.pop(pid, None)
                 self._inaccessible_process_pids.add(pid)
-        return total if observed else None
+        cpu_percent = cpu_total if cpu_observed else None
+        rss_mib = float(rss_total_bytes) / (1024**2) if rss_observed else None
+        return cpu_percent, rss_mib
 
     def _shutdown_nvml(self) -> None:
         if self._pynvml is None:
@@ -238,18 +252,22 @@ def summarize_resource_samples(
     *,
     interval_s: float,
     error: str | None = None,
+    gpu_process_host_metrics_error: str | None = None,
 ) -> dict[str, Any]:
     if not samples:
-        return {
+        result = {
             "available": False,
             "sample_interval_s": interval_s,
             "samples": 0,
             "error": error,
         }
+        if gpu_process_host_metrics_error is not None:
+            result["gpu_process_host_metrics_error"] = gpu_process_host_metrics_error
+        return result
 
     steady_count = max(1, min(len(samples), round(5.0 / interval_s)))
     steady = samples[-steady_count:]
-    return {
+    result = {
         "available": True,
         "sample_interval_s": interval_s,
         "samples": len(samples),
@@ -264,6 +282,9 @@ def summarize_resource_samples(
         ),
         "gpu_process_memory_mib": _optional_series_summary(
             [sample.gpu_process_memory_mib for sample in samples]
+        ),
+        "gpu_process_rss_mib": _optional_series_summary(
+            [sample.gpu_process_rss_mib for sample in samples]
         ),
         "gpu_util_percent": _optional_series_summary(
             [sample.gpu_util_percent for sample in samples]
@@ -280,6 +301,9 @@ def summarize_resource_samples(
         ),
         "error": error,
     }
+    if gpu_process_host_metrics_error is not None:
+        result["gpu_process_host_metrics_error"] = gpu_process_host_metrics_error
+    return result
 
 
 def collect_benchmark_provenance(
