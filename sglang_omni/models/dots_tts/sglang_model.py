@@ -46,6 +46,11 @@ class DotsTTSSGLangModel(nn.Module):
         )
         self._graph_feedback_buffer: torch.Tensor | None = None
 
+    @property
+    def language_model(self) -> Qwen2ForCausalLM:
+        """Expose the backbone for SGLang prefill-graph discovery."""
+        return self.qwen2
+
     def get_input_embeddings(self):
         return self.qwen2.get_input_embeddings()
 

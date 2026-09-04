@@ -7,6 +7,10 @@ import logging
 from typing import Any
 
 from sglang_omni.scheduling.engine_factory import TtsEngineBuilder
+from sglang_omni.scheduling.generation_batch_policy import (
+    CudaGraphBackend,
+    build_default_prefill_cuda_graph_bs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +18,7 @@ logger = logging.getLogger(__name__)
 class DotsTTSEngineBuilder(TtsEngineBuilder):
     model_name = "dots.tts"
     context_length = 2048
+    supports_breakable_prefill_cuda_graph = True
 
     def __init__(
         self,
@@ -78,6 +83,23 @@ class DotsTTSEngineBuilder(TtsEngineBuilder):
             raise ValueError(
                 "dots.tts uses its DiT compile path; SGLang backbone compile is disabled"
             )
+        if (
+            overrides.get("cuda_graph_backend_prefill") == CudaGraphBackend.BREAKABLE
+            and "cuda_graph_bs_prefill" not in overrides
+        ):
+            caps = [
+                self.context_length,
+                overrides.get("max_prefill_tokens"),
+                overrides.get("cuda_graph_max_bs_prefill"),
+                overrides.get("max_total_tokens"),
+            ]
+            if int(overrides.get("chunked_prefill_size", 0)) > 0:
+                caps.append(overrides["chunked_prefill_size"])
+            ladder = build_default_prefill_cuda_graph_bs(
+                min(int(cap) for cap in caps if cap is not None)
+            )
+            overrides["cuda_graph_bs_prefill"] = ladder
+            overrides["cuda_graph_max_bs_prefill"] = max(ladder)
         if not bool(overrides.get("disable_cuda_graph", True)):
             # note (luojiaxuan): the decode graph must be captured with hidden states (FULL);
             # its can_run gate requires an exact hidden-mode match with the
