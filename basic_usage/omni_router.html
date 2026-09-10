@@ -419,7 +419,7 @@ window.runMermaid = runMermaid;</script>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="0.1.4" />
-    <meta name="docbuild:last-update" content="Sep 06, 2026"/>
+    <meta name="docbuild:last-update" content="Sep 10, 2026"/>
   
     
     <script src="../_static/searchtools.js"></script>
@@ -589,6 +589,8 @@ window.runMermaid = runMermaid;</script>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/qwen3_omni.html">Qwen3-Omni</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/ming_omni.html">Ming-Omni</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/llada2_uni.html">LLaDA2.0-Uni</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cookbook/fun_cosyvoice3.html">Fun-CosyVoice3</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cookbook/auk.html">AuK</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">General Usage</span></p>
 <ul class="current nav bd-sidenav">
@@ -1234,9 +1236,9 @@ worker unhealthy when it expires.
 Speech configuration is replayed byte-for-byte; the router extracts routing
 facts while the worker owns protocol-value validation.</p>
 <p>Uploaded voices have one explicit owner configured by
-<code class="docutils literal notranslate"><span class="pre">router.voice_owner_worker_id</span></code>. Voice CRUD and requests that depend on a stored
-voice are pinned to that worker. Stateless speech continues to use normal
-worker selection. The router does not store, replicate, or reconcile
+<code class="docutils literal notranslate"><span class="pre">router.voice_owner_worker_id</span></code>. Voice CRUD and uploaded-name requests are
+pinned to that worker. Preset names and explicit references continue to use
+normal worker selection. The router does not store, replicate, or reconcile
 worker-local voice data. <code class="docutils literal notranslate"><span class="pre">voice_name_policy</span> <span class="pre">=</span> <span class="pre">&quot;preset&quot;</span></code> declares names provided
 by the serving model. <code class="docutils literal notranslate"><span class="pre">voice_name_policy</span> <span class="pre">=</span> <span class="pre">&quot;uploaded&quot;</span></code> declares names resolved
 from worker-local voice state; hybrid pipelines should use <code class="docutils literal notranslate"><span class="pre">uploaded</span></code> so named
@@ -1260,14 +1262,36 @@ compatible. Current worker load does not change readiness.</p>
 <h2>Operations<a class="headerlink" href="#operations" title="Link to this heading">#</a></h2>
 <p><code class="docutils literal notranslate"><span class="pre">/v1/models</span></code> returns a sorted, deduplicated inventory built from worker defaults
 and correlated profile model IDs. <code class="docutils literal notranslate"><span class="pre">/metrics</span></code> exposes Prometheus lifecycle,
-readiness, health, admission, and worker-load gauges. <code class="docutils literal notranslate"><span class="pre">/diagnostics</span></code> returns
-bounded deterministic JSON for lifecycle, readiness, admission, and configured
-workers.</p>
+readiness, health, admission, worker-load, listener, buffered-byte,
+classification-slot, and WebSocket-session gauges. It also exposes cumulative
+request and response-header counts, router-generated faults, saturation
+rejections, worker probe outcomes, classification outcomes, WebSocket
+termination reasons, and committed HTTP response-body outcomes.</p>
+<p>The response-header histogram measures from router boundary entry until an HTTP
+response is available. It does not measure response-body completion, streaming
+TTFT, or WebSocket-session duration. Requests cancelled before that boundary
+are counted separately. Classification histograms separate slot wait,
+blocking-executor wait, and execution for each request kind. Blocking work that
+outlives a caller timeout or cancellation records its phase durations when that
+work starts or finishes, without changing the caller’s terminal outcome.
+WebSocket termination counters distinguish setup from active relay and record
+one bounded terminal cause per upgraded session. They do not measure completion
+of the bounded close handshake. HTTP response-body counters distinguish
+complete bodies, upstream body errors, and bodies dropped before completion.
+The post-commit relay-failure counter is the upstream-error subset.
+<code class="docutils literal notranslate"><span class="pre">/diagnostics</span></code> returns bounded deterministic JSON for the same router-local
+state and marks the configured voice owner. Each diagnostic worker includes
+cumulative dispatch counts for the fixed service classes and voice-control
+operations. A speech batch contributes one dispatch while active worker load
+remains item-weighted. Workers also include their latest probe result, HTTP
+status when present, observation time, transition streaks, and cumulative
+outcomes.</p>
 <p>Operations responses snapshot router-local state and never contact workers.
 Admission values come from the semaphores that enforce router limits. Worker
 load comes from the same counters used by <code class="docutils literal notranslate"><span class="pre">least_requests</span></code>. Metric labels use
 fixed vocabularies instead of worker IDs, model IDs, request IDs, paths, or
-client input.</p>
+client input. Listener usage includes the slot reserved by the pending accept.
+registered WebSocket sessions represent callbacks retained for shutdown.</p>
 <p>Structured logging covers lifecycle events, health transitions, and exceptional
 conditions. <code class="docutils literal notranslate"><span class="pre">logging.filter</span></code> accepts a tracing filter expression, and
 <code class="docutils literal notranslate"><span class="pre">logging.format</span></code> accepts <code class="docutils literal notranslate"><span class="pre">json</span></code> or <code class="docutils literal notranslate"><span class="pre">compact</span></code>.</p>
@@ -1507,7 +1531,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Sep 06, 2026.
+  Last updated on Sep 10, 2026.
   <br/>
 </p>
   </div>

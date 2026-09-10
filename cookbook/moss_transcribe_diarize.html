@@ -61,7 +61,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="0.1.4" />
-    <meta name="docbuild:last-update" content="Sep 06, 2026"/>
+    <meta name="docbuild:last-update" content="Sep 10, 2026"/>
   
     
     <script src="../_static/searchtools.js"></script>
@@ -231,6 +231,8 @@
 <li class="toctree-l1"><a class="reference internal" href="qwen3_omni.html">Qwen3-Omni</a></li>
 <li class="toctree-l1"><a class="reference internal" href="ming_omni.html">Ming-Omni</a></li>
 <li class="toctree-l1"><a class="reference internal" href="llada2_uni.html">LLaDA2.0-Uni</a></li>
+<li class="toctree-l1"><a class="reference internal" href="fun_cosyvoice3.html">Fun-CosyVoice3</a></li>
+<li class="toctree-l1"><a class="reference internal" href="auk.html">AuK</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">General Usage</span></p>
 <ul class="nav bd-sidenav">
@@ -806,7 +808,7 @@ set the request target to <code class="docutils literal notranslate"><span class
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">max_new_tokens</span></code></p></td>
 <td><p>int</p></td>
 <td><p>duration scaled</p></td>
-<td><p>Max generated tokens. Omitted requests default to <code class="docutils literal notranslate"><span class="pre">max(5120,</span> <span class="pre">10</span> <span class="pre">*</span> <span class="pre">audio</span> <span class="pre">seconds)</span></code>, or to the fixed stage value when the operator configured one. Explicit values always win and are clamped to the remaining model context</p></td>
+<td><p>Max generated tokens. With the stock config, omitted requests use <code class="docutils literal notranslate"><span class="pre">max(512,</span> <span class="pre">10</span> <span class="pre">*</span> <span class="pre">audio</span> <span class="pre">seconds)</span></code>; empty audio uses a 128-token fallback. A fixed stage value disables duration scaling. Explicit values always win and are clamped to the remaining model context</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">prompt</span></code></p></td>
 <td><p>string</p></td>
@@ -1085,7 +1087,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Sep 06, 2026.
+  Last updated on Sep 10, 2026.
   <br/>
 </p>
   </div>
