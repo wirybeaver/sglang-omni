@@ -42,7 +42,7 @@
   <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9" />
 <link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9" />
 
-    <script src="../_static/documentation_options.js?v=98feffa1"></script>
+    <script src="../_static/documentation_options.js?v=8f8a7fc7"></script>
     <script src="../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -60,8 +60,8 @@
     <link rel="prev" title="Fish Audio S2-Pro" href="fishaudio_s2_pro.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.1.5" />
-    <meta name="docbuild:last-update" content="Sep 15, 2026"/>
+  <meta name="docsearch:version" content="0.1.6" />
+    <meta name="docbuild:last-update" content="Sep 19, 2026"/>
   
     
     <script src="../_static/searchtools.js"></script>
@@ -229,6 +229,7 @@
 <li class="toctree-l1"><a class="reference internal" href="moss_transcribe_diarize.html">MOSS-Transcribe-Diarize</a></li>
 <li class="toctree-l1"><a class="reference internal" href="whisper_asr.html">Whisper ASR</a></li>
 <li class="toctree-l1"><a class="reference internal" href="qwen3_omni.html">Qwen3-Omni</a></li>
+<li class="toctree-l1"><a class="reference internal" href="minicpm_o.html">MiniCPM-o Reference Audio</a></li>
 <li class="toctree-l1"><a class="reference internal" href="ming_omni.html">Ming-Omni</a></li>
 <li class="toctree-l1"><a class="reference internal" href="nemotron_voicechat.html">NemotronLabs VoiceChat</a></li>
 <li class="toctree-l1"><a class="reference internal" href="llada2_uni.html">LLaDA2.0-Uni</a></li>
@@ -498,6 +499,7 @@
                 <ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#prerequisites">Prerequisites</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#server-configuration">Server Configuration</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ascend-npu-baseline">Ascend NPU baseline</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#deterministic-inference">Deterministic Inference</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#overload-admission-policy">Overload / admission policy</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#breakable-prefill-cuda-graphs">Breakable prefill CUDA graphs</a></li>
@@ -607,6 +609,28 @@ sgl-omni<span class="w"> </span>serve<span class="w"> </span><span class="se">\<
 <span class="w">  </span>--port<span class="w"> </span><span class="m">8000</span>
 </pre></div>
 </div>
+<section id="ascend-npu-baseline">
+<h3>Ascend NPU baseline<a class="headerlink" href="#ascend-npu-baseline" title="Link to this heading">#</a></h3>
+<p>The NPU configurations use SGLang’s <code class="docutils literal notranslate"><span class="pre">ascend</span></code> attention backend for the Talker
+and PyTorch SDPA for both Speech Tokenizer instances. Talker graph capture
+(<code class="docutils literal notranslate"><span class="pre">cuda_graph</span></code>), private Talker compile, and asynchronous vocoder decode stay
+disabled. The 0.6B Base
+configuration has been validated with 16 concurrent requests; the other
+configurations retain a conservative single-request baseline.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># 0.6B Base</span>
+sgl-omni<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--model-path<span class="w"> </span>Qwen/Qwen3-TTS-12Hz-0.6B-Base<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--config<span class="w"> </span>examples/configs/qwen3_tts_0_6b_npu.yaml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--port<span class="w"> </span><span class="m">8000</span>
+</pre></div>
+</div>
+<p>Use <code class="docutils literal notranslate"><span class="pre">qwen3_tts_1_7b_npu.yaml</span></code>, <code class="docutils literal notranslate"><span class="pre">qwen3_tts_0_6b_customvoice_npu.yaml</span></code>, or
+<code class="docutils literal notranslate"><span class="pre">qwen3_tts_1_7b_voicedesign_npu.yaml</span></code> for the other supported checkpoints.
+The 0.6B and 1.7B files intentionally have separate <code class="docutils literal notranslate"><span class="pre">mem_fraction_static</span></code>
+starting values. Calibrate configurations that retain the single-request
+baseline on the target NPU before increasing <code class="docutils literal notranslate"><span class="pre">max_running_requests</span></code> or any
+vocoder batch limit.</p>
+</section>
 <section id="deterministic-inference">
 <h3>Deterministic Inference<a class="headerlink" href="#deterministic-inference" title="Link to this heading">#</a></h3>
 <p>Dynamic batching can change Qwen3-TTS codec and waveform outputs even when the
@@ -618,7 +642,8 @@ checkpoints provide an opt-in deterministic mode:</p>
 <p>When enabled, the same prompt, reference audio, and seed produce byte-identical
 PCM across runtime batch sizes. This mode reduces throughput because it
 serializes reference preprocessing and vocoder decoding and disables both the
-initial and follow-up vocoder CUDA Graphs, so it is disabled by default.</p>
+initial and follow-up vocoder graph-capture paths (<code class="docutils literal notranslate"><span class="pre">initial_cuda_graph</span></code> and
+<code class="docutils literal notranslate"><span class="pre">followup_cuda_graph</span></code>), so it is disabled by default.</p>
 </section>
 <section id="overload-admission-policy">
 <h3>Overload / admission policy<a class="headerlink" href="#overload-admission-policy" title="Link to this heading">#</a></h3>
@@ -650,8 +675,8 @@ defaults to 4 request-build workers with pending depth 16.</p>
 </section>
 <section id="breakable-prefill-cuda-graphs">
 <h3>Breakable prefill CUDA graphs<a class="headerlink" href="#breakable-prefill-cuda-graphs" title="Link to this heading">#</a></h3>
-<p>Non-Base checkpoints (CustomVoice, VoiceDesign) default to the breakable
-prefill CUDA-graph backend with a token ladder up to 512:</p>
+<p>Every Qwen3-TTS checkpoint (Base, CustomVoice, VoiceDesign) defaults to the
+breakable prefill CUDA-graph backend with a token ladder up to 512:</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <thead>
 <tr class="row-odd"><th class="head"><p>Knob</p></th>
@@ -662,7 +687,7 @@ prefill CUDA-graph backend with a token ladder up to 512:</p>
 <tbody>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--tts_engine.engine.cuda_graph_backend_prefill</span></code></p></td>
 <td><p>Prefill graph backend (<code class="docutils literal notranslate"><span class="pre">breakable</span></code> or <code class="docutils literal notranslate"><span class="pre">disabled</span></code>)</p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">breakable</span></code> on CustomVoice, unset elsewhere</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">breakable</span></code></p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--tts_engine.engine.cuda_graph_bs_prefill</span></code></p></td>
 <td><p>Prefill token-count ladder to capture</p></td>
@@ -682,10 +707,6 @@ misses. Measured over 3203 prefills at 10 and 20 RPS, 1301 of them (40.6%)
 are exactly one token, and they are the only shapes that fall back: 2 and
 3 already replay inside bucket 4. Adding the single <code class="docutils literal notranslate"><span class="pre">1</span></code> bucket takes the
 fallback rate to zero.</p>
-<p>Only CustomVoice takes this default, selected by the checkpoint’s
-<code class="docutils literal notranslate"><span class="pre">tts_model_type</span></code>. Base prefills also carry reference audio, so their shape
-distribution differs, and VoiceDesign has not been measured; both keep the
-eager path.</p>
 <p>Opt out with <code class="docutils literal notranslate"><span class="pre">--tts_engine.engine.cuda_graph_backend_prefill</span> <span class="pre">disabled</span></code>. The
 default costs extra graph capture during startup. Raising
 <code class="docutils literal notranslate"><span class="pre">cuda_graph_max_bs_prefill</span></code> on its own regrows the default ladder to the
@@ -1302,6 +1323,7 @@ checkpoint is less prone.</p></li>
     <ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#prerequisites">Prerequisites</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#server-configuration">Server Configuration</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ascend-npu-baseline">Ascend NPU baseline</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#deterministic-inference">Deterministic Inference</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#overload-admission-policy">Overload / admission policy</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#breakable-prefill-cuda-graphs">Breakable prefill CUDA graphs</a></li>
@@ -1365,7 +1387,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Sep 15, 2026.
+  Last updated on Sep 19, 2026.
   <br/>
 </p>
   </div>
