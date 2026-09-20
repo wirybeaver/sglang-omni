@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""AuK opt-in shape-aware DiT grouping."""
+"""AuK adaptive shape-aware DiT grouping."""
 
 from unittest.mock import Mock
 
@@ -12,7 +12,7 @@ from sglang_omni.models.auk.flow_matching import AuKSampleItem
 from sglang_omni.models.auk.payload_types import AuKState
 from sglang_omni.models.auk.stages import (
     create_auk_engine_executor,
-    partition_sample_items_by_target,
+    group_sample_items_by_padding_budget,
     sample_batch,
 )
 from sglang_omni.proto import OmniRequest, StagePayload
@@ -33,7 +33,7 @@ def make_item(
 def test_shape_grouping_is_enabled_by_default():
     items = [make_item(frames) for frames in (100, 110, 400)]
 
-    groups = partition_sample_items_by_target(items, 0.2)
+    groups = group_sample_items_by_padding_budget(items, 25.0)
 
     assert [[index for index, _ in group] for group in groups] == [[0, 1], [2]]
     engine = next(
@@ -41,29 +41,29 @@ def test_shape_grouping_is_enabled_by_default():
         for stage in AuKPipelineConfig.model_fields["stages"].default
         if stage.name == "auk_engine"
     )
-    assert engine.factory.min_batch_work_savings == 0.2
+    assert engine.factory.dit_grouping_pad_budget_percent == 25.0
 
 
 def test_none_disables_shape_grouping():
     items = [make_item(frames) for frames in (100, 110, 400)]
 
-    groups = partition_sample_items_by_target(items, None)
+    groups = group_sample_items_by_padding_budget(items, None)
 
     assert [[index for index, _ in group] for group in groups] == [[0, 1, 2]]
     manager = ConfigManager(AuKPipelineConfig(model_path="tencent/AuK"))
     config = manager.merge_config(
         manager.parse_extra_args(
-            ["--auk_engine.factory.min_batch_work_savings", "none"]
+            ["--auk_engine.factory.dit_grouping_pad_budget_percent", "none"]
         )
     )
     engine = next(stage for stage in config.stages if stage.name == "auk_engine")
-    assert engine.factory.min_batch_work_savings is None
+    assert engine.factory.dit_grouping_pad_budget_percent is None
 
 
-def test_shape_grouping_is_bounded_to_two_groups_and_preserves_indices():
+def test_shape_grouping_uses_the_fewest_groups_within_budget():
     items = [make_item(frames) for frames in (400, 100, 110)]
 
-    groups = partition_sample_items_by_target(items, 0.25)
+    groups = group_sample_items_by_padding_budget(items, 25.0)
 
     assert [[index for index, _ in group] for group in groups] == [[1, 2], [0]]
 
@@ -71,14 +71,14 @@ def test_shape_grouping_is_bounded_to_two_groups_and_preserves_indices():
 def test_shape_grouping_keeps_similar_shapes_together():
     items = [make_item(frames) for frames in (100, 110, 120)]
 
-    groups = partition_sample_items_by_target(items, 0.25)
+    groups = group_sample_items_by_padding_budget(items, 25.0)
 
     assert [[index for index, _ in group] for group in groups] == [[0, 1, 2]]
 
 
-def test_shape_grouping_rejects_invalid_savings_threshold():
-    with pytest.raises(ValueError, match="between 0 and 1"):
-        partition_sample_items_by_target([make_item(100), make_item(400)], 1.1)
+def test_shape_grouping_rejects_invalid_padding_budget():
+    with pytest.raises(ValueError, match="between 0 and 100"):
+        group_sample_items_by_padding_budget([make_item(100), make_item(400)], 101)
 
 
 def test_shape_grouping_scores_reference_and_text_padding():
@@ -88,14 +88,14 @@ def test_shape_grouping_scores_reference_and_text_padding():
         make_item(400, reference_frames=400, text_frames=400),
     ]
 
-    groups = partition_sample_items_by_target(items, 0.2)
+    groups = group_sample_items_by_padding_budget(items, 25.0)
 
-    assert [[index for index, _ in group] for group in groups] == [[0, 1, 2]]
+    assert [[index for index, _ in group] for group in groups] == [[0], [1], [2]]
 
 
-def test_shape_grouping_rejects_invalid_threshold_before_loading_model():
-    with pytest.raises(ValueError, match="between 0 and 1"):
-        create_auk_engine_executor("unused", min_batch_work_savings=1.1)
+def test_shape_grouping_rejects_invalid_budget_before_loading_model():
+    with pytest.raises(ValueError, match="between 0 and 100"):
+        create_auk_engine_executor("unused", dit_grouping_pad_budget_percent=101)
 
 
 def test_sample_batch_restores_request_order_after_split():
@@ -125,7 +125,7 @@ def test_sample_batch_restores_request_order_after_split():
         torch.float32,
         500,
         {},
-        min_batch_work_savings=0.2,
+        dit_grouping_pad_budget_percent=25.0,
     )
 
     assert [

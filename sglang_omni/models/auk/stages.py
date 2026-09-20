@@ -286,43 +286,68 @@ def create_conditioning_executor(
     )
 
 
-def partition_sample_items_by_target(
-    items: list[AuKSampleItem], min_batch_work_savings: float | None
+def group_sample_items_by_padding_budget(
+    items: list[AuKSampleItem], pad_budget_percent: float | None
 ) -> list[list[tuple[int, AuKSampleItem]]]:
-    validate_min_batch_work_savings(min_batch_work_savings)
+    validate_dit_grouping_pad_budget(pad_budget_percent)
     indexed = list(enumerate(items))
-    if min_batch_work_savings is None or len(indexed) < 2:
+    if pad_budget_percent is None or len(indexed) < 2:
         return [indexed]
 
-    ranked = sorted(indexed, key=lambda pair: pair[1].target_frames)
-
-    def padded_work(group: list[tuple[int, AuKSampleItem]]) -> int:
-        shapes = [
-            (
-                item.target_frames,
-                0 if item.ref_latent is None else item.ref_latent.shape[0],
-                item.conditioning.shape[0],
-            )
-            for _, item in group
-        ]
-        return len(group) * sum(
-            max(shape[axis] for shape in shapes) for axis in range(3)
+    ranked = tuple(sorted(indexed, key=lambda pair: (pair[1].target_frames, pair[0])))
+    item_shapes = tuple(
+        (
+            item.target_frames,
+            0 if item.ref_latent is None else item.ref_latent.shape[0],
+            item.conditioning.shape[0],
         )
-
-    unsplit_work = padded_work(ranked)
-    split_work, split_at = min(
-        (padded_work(ranked[:index]) + padded_work(ranked[index:]), index)
-        for index in range(1, len(ranked))
+        for _, item in ranked
     )
-    savings = (unsplit_work - split_work) / unsplit_work
-    if savings < min_batch_work_savings:
-        return [indexed]
-    return [ranked[:split_at], ranked[split_at:]]
+    ideal_work = sum(sum(shape) for shape in item_shapes)
+    item_count = len(ranked)
+
+    @lru_cache(maxsize=None)
+    def optimal_partition(
+        start: int, remaining_groups: int
+    ) -> tuple[int, tuple[int, ...]] | None:
+        if remaining_groups == 0:
+            return (0, ()) if start == item_count else None
+        if item_count - start < remaining_groups:
+            return None
+
+        best: tuple[int, tuple[int, ...]] | None = None
+        last_end = item_count - remaining_groups + 1
+        for end in range(start + 1, last_end + 1):
+            suffix = optimal_partition(end, remaining_groups - 1)
+            if suffix is None:
+                continue
+            group_work = (end - start) * sum(
+                max(item_shapes[index][axis] for index in range(start, end))
+                for axis in range(3)
+            )
+            candidate = (group_work + suffix[0], (end,) + suffix[1])
+            if best is None or candidate < best:
+                best = candidate
+        return best
+
+    for group_count in range(1, item_count + 1):
+        plan = optimal_partition(0, group_count)
+        assert plan is not None
+        padding_percent = (plan[0] / ideal_work - 1) * 100
+        if padding_percent <= pad_budget_percent + 1e-9:
+            groups = []
+            start = 0
+            for end in plan[1]:
+                groups.append(list(ranked[start:end]))
+                start = end
+            return groups
+
+    raise AssertionError("singleton DiT groups must satisfy the padding budget")
 
 
-def validate_min_batch_work_savings(min_batch_work_savings: float | None) -> None:
-    if min_batch_work_savings is not None and not 0 <= min_batch_work_savings <= 1:
-        raise ValueError("min_batch_work_savings must be between 0 and 1")
+def validate_dit_grouping_pad_budget(pad_budget_percent: float | None) -> None:
+    if pad_budget_percent is not None and not 0 <= pad_budget_percent <= 100:
+        raise ValueError("dit_grouping_pad_budget_percent must be between 0 and 100")
 
 
 def sample_batch(
@@ -332,7 +357,7 @@ def sample_batch(
     dtype,
     max_frames,
     sampling,
-    min_batch_work_savings,
+    dit_grouping_pad_budget_percent,
 ):
     started = time.perf_counter()
     states = [load_state(payload, AuKState) for payload in payloads]
@@ -347,7 +372,9 @@ def sample_batch(
         )
         for state in states
     ]
-    groups = partition_sample_items_by_target(items, min_batch_work_savings)
+    groups = group_sample_items_by_padding_budget(
+        items, dit_grouping_pad_budget_percent
+    )
     with autocast(device, dtype):
         if len(groups) == 1:
             logger.info(f"AuK DiT: sampling batch of {len(items)} requests")
@@ -391,7 +418,7 @@ def create_auk_engine_executor(
     enable_dit_torch_compile: bool = False,
     enable_dit_cuda_graph: bool = False,
     dit_cuda_graph_capture_shapes: Sequence[Sequence[int]] | None = None,
-    min_batch_work_savings: float | None = 0.2,
+    dit_grouping_pad_budget_percent: float | None = 25.0,
 ) -> SimpleScheduler:
     """Build the DiT sampling stage.
 
@@ -400,7 +427,7 @@ def create_auk_engine_executor(
     autocast. See docs/cookbook/auk.md, Sampling, for the compile and graph
     options and the capture shape format.
     """
-    validate_min_batch_work_savings(min_batch_work_savings)
+    validate_dit_grouping_pad_budget(dit_grouping_pad_budget_percent)
     # Named dtypes are checked before resolve_checkpoint, which downloads.
     compute_dtype = resolve_dtype(field="dtype", name=dtype)
     backbone_dtype = resolve_dtype(field="weight_dtype", name=weight_dtype)
@@ -443,7 +470,7 @@ def create_auk_engine_executor(
             autocast_dtype,
             config.seconds_to_frames(max_seconds),
             sampling,
-            min_batch_work_savings,
+            dit_grouping_pad_budget_percent,
         ),
         device,
         max_batch_size,
