@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Literal
 
 import torch
@@ -28,6 +29,17 @@ from sglang_omni.models.minicpm_o.components.token2wav.conformer import (
     make_pad_mask,
 )
 from sglang_omni.models.minicpm_o.components.token2wav.dit import DiT
+from sglang_omni.models.minicpm_o.components.token2wav.fixed_packed import (
+    FixedPackedLayout,
+    build_fixed_packed_layout,
+)
+from sglang_omni.models.minicpm_o.components.token2wav.flow_cuda_graph import (
+    CapturedPackedFlowGraph,
+    FlowCudaGraphRunner,
+)
+from sglang_omni.models.minicpm_o.components.token2wav.packed_dit_cuda_graph import (
+    CapturedPackedDiTGraph,
+)
 
 
 class CausalConditionalCFM(torch.nn.Module):
@@ -37,6 +49,7 @@ class CausalConditionalCFM(torch.nn.Module):
         self.estimator = estimator
         self.inference_cfg_rate = inference_cfg_rate
         self.out_channels = estimator.out_channels
+        self.graph_runner: FlowCudaGraphRunner | None = None
         self.register_buffer(
             "rand_noise",
             torch.randn([1, self.out_channels, 50 * 600]),
@@ -51,9 +64,10 @@ class CausalConditionalCFM(torch.nn.Module):
         mask: torch.Tensor,
         speaker_embeddings: torch.Tensor,
         mel_conditioning: torch.Tensor,
+        *,
+        packed_valid_frames: int | None = None,
     ) -> torch.Tensor:
-        batch_size = x.size(0)
-        t = t_span[0].expand(batch_size)
+        t = t_span[0].expand(x.size(0))
         dt = t_span[1] - t_span[0]
         assert self.inference_cfg_rate > 0, "inference_cfg_rate better > 0"
         paired_mask = torch.cat([mask, mask], dim=0)
@@ -64,31 +78,111 @@ class CausalConditionalCFM(torch.nn.Module):
         paired_mel_conditioning = torch.cat(
             [mel_conditioning, torch.zeros_like(mel_conditioning)], dim=0
         )
-        for step in range(1, len(t_span)):
-            paired_sample = torch.cat([x, x], dim=0)
-            paired_timesteps = torch.cat([t, t], dim=0)
-            conditional_derivative = self.estimator.forward(
-                paired_sample,
-                paired_mask,
-                paired_mu,
-                paired_timesteps,
-                paired_speaker_embeddings,
-                paired_mel_conditioning,
+        graph_runner = self.graph_runner
+        packed_runner = self.estimator.packed_graph_runner
+        is_packed = self.estimator.enable_variable_length and x.shape[0] > 1
+        packed_capacity = (
+            packed_runner.fit(x.shape[0], x.shape[2], packed_valid_frames)
+            if packed_runner is not None and is_packed
+            else None
+        )
+        graph_key = (
+            graph_runner.fit(x)
+            if graph_runner is not None
+            and (not is_packed or packed_capacity is not None)
+            else None
+        )
+        packed_layout = (
+            build_fixed_packed_layout(
+                paired_mask.bool().squeeze(1).sum(dim=1, dtype=torch.int32),
+                graph_key[1] if graph_key is not None else x.shape[2],
+                packed_capacity,
+                self.estimator.blocks[0].conv.kernel_size - 1,
             )
-            conditional_derivative, unconditional_derivative = torch.split(
-                conditional_derivative, [x.size(0), x.size(0)], dim=0
+            if packed_capacity is not None
+            else None
+        )
+        with (
+            graph_runner.lock if graph_key is not None else nullcontext(),
+            packed_runner.lock if packed_layout is not None else nullcontext(),
+        ):
+            captured_flow = (
+                graph_runner.prepare(
+                    graph_key,
+                    x,
+                    paired_mu,
+                    paired_mask,
+                    paired_speaker_embeddings,
+                    paired_mel_conditioning,
+                    packed_layout,
+                )
+                if graph_key is not None
+                else None
             )
-            guided_derivative = (
-                (1.0 + self.inference_cfg_rate) * conditional_derivative
-                - self.inference_cfg_rate * unconditional_derivative
+            captured_packed = (
+                packed_runner.prepare(packed_layout)
+                if packed_layout is not None
+                else None
             )
-            x = x + dt * guided_derivative
-            t = t + dt
-            if step < len(t_span) - 1:
-                dt = t_span[step + 1] - t_span[step]
-            else:
-                pass
-        return x
+            for step in range(1, len(t_span)):
+                if isinstance(captured_flow, CapturedPackedFlowGraph):
+                    graph_runner.run_packed_step(
+                        captured_flow, packed_runner, captured_packed, t, dt
+                    )
+                elif captured_flow is not None:
+                    graph_runner.run_step(captured_flow, t, dt)
+                else:
+                    x = self.euler_step(
+                        x,
+                        t,
+                        dt,
+                        paired_mu,
+                        paired_mask,
+                        paired_speaker_embeddings,
+                        paired_mel_conditioning,
+                        packed_layout=packed_layout,
+                        packed_graph=captured_packed,
+                    )
+                t = t + dt
+                if step < len(t_span) - 1:
+                    dt = t_span[step + 1] - t_span[step]
+                else:
+                    pass
+            return (
+                captured_flow.output[:, :, : x.shape[2]].clone()
+                if captured_flow is not None
+                else x
+            )
+
+    def euler_step(
+        self,
+        x: torch.Tensor,
+        t: torch.Tensor,
+        dt: torch.Tensor,
+        paired_mu: torch.Tensor,
+        paired_mask: torch.Tensor,
+        paired_speaker_embeddings: torch.Tensor,
+        paired_mel_conditioning: torch.Tensor,
+        *,
+        packed_layout: FixedPackedLayout | None = None,
+        packed_graph: CapturedPackedDiTGraph | None = None,
+    ) -> torch.Tensor:
+        derivative = self.estimator.forward(
+            torch.cat([x, x], dim=0),
+            paired_mask,
+            paired_mu,
+            torch.cat([t, t], dim=0),
+            paired_speaker_embeddings,
+            paired_mel_conditioning,
+            packed_layout=packed_layout,
+            packed_graph=packed_graph,
+        )
+        conditional_derivative, unconditional_derivative = derivative.chunk(2, dim=0)
+        guided_derivative = (
+            (1.0 + self.inference_cfg_rate) * conditional_derivative
+            - self.inference_cfg_rate * unconditional_derivative
+        )
+        return x + dt * guided_derivative
 
     @torch.inference_mode()
     def forward(
@@ -99,6 +193,7 @@ class CausalConditionalCFM(torch.nn.Module):
         mel_conditioning: torch.Tensor,
         n_timesteps: int = 10,
         temperature: float = 1.0,
+        packed_valid_frames: int | None = None,
     ) -> torch.Tensor:
         if n_timesteps <= 0:
             raise ValueError("n_timesteps must be positive")
@@ -117,7 +212,13 @@ class CausalConditionalCFM(torch.nn.Module):
         t_span = torch.linspace(0, 1, n_timesteps + 1, device=mu.device, dtype=mu.dtype)
         t_span = 1 - torch.cos(t_span * 0.5 * torch.pi)
         return self.solve_euler(
-            z, t_span, mu, mask, speaker_embeddings, mel_conditioning
+            z,
+            t_span,
+            mu,
+            mask,
+            speaker_embeddings,
+            mel_conditioning,
+            packed_valid_frames=packed_valid_frames,
         )
 
 
@@ -201,12 +302,27 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
             prompt_frames = prompt_length * self.up_rate
             mel_conditioning[i, :prompt_frames] = prompt_mel[i, :prompt_frames]
         mel_conditioning = mel_conditioning.transpose(1, 2).contiguous()
+        packed_valid_frames = (
+            2
+            * sum(
+                min(
+                    (prompt_length + token_length) * self.up_rate,
+                    hidden_states.shape[1],
+                )
+                for prompt_length, token_length in zip(
+                    prompt_row_lengths, generated_row_lengths, strict=True
+                )
+            )
+            if len(generated_row_lengths) > 1
+            else None
+        )
         predicted_mel = self.decoder.forward(
             mu=hidden_states.transpose(1, 2).contiguous(),
             mask=frame_mask.unsqueeze(1),
             speaker_embeddings=speaker_embeddings,
             mel_conditioning=mel_conditioning,
             n_timesteps=n_timesteps,
+            packed_valid_frames=packed_valid_frames,
         )
         generated = [
             predicted_mel[

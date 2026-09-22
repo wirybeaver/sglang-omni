@@ -111,12 +111,26 @@ def talker_stage(*, gpu: int, process: str) -> StageConfig:
     )
 
 
-def code2wav_stage(*, gpu: int, process: str) -> StageConfig:
-    return StageConfig(
+class MiniCPMOCode2WavFactoryArgs(FactoryArgs):
+    """Optional Flow execution settings for Code2Wav."""
+
+    enable_flow_cuda_graph: bool = True
+    flow_cuda_graph_capture_shapes: tuple[tuple[int, int], ...] | None = None
+    packed_dit_cuda_graph_capture_shapes: tuple[tuple[int, int], ...] | None = None
+
+
+class MiniCPMOCode2WavStageConfig(StageConfig):
+    factory: MiniCPMOCode2WavFactoryArgs = Field(
+        default_factory=MiniCPMOCode2WavFactoryArgs
+    )
+
+
+def code2wav_stage(*, gpu: int, process: str) -> MiniCPMOCode2WavStageConfig:
+    return MiniCPMOCode2WavStageConfig(
         name="code2wav",
         process=process,
         factory_path=f"{PKG}.stages.create_code2wav_executor",
-        factory=FactoryArgs(
+        factory=MiniCPMOCode2WavFactoryArgs(
             max_batch_size=16,
             # Prefetched references make batches form quickly; the window keeps
             # them full so flow does not steal GPU time from the talker.
@@ -183,6 +197,7 @@ class MiniCPMOSpeechPipelineConfig(MiniCPMOPipelineConfig):
     stage_config_types: ClassVar[dict[str, type[StageConfig]]] = {
         THINKER_STAGE: EngineStageConfig,
         "talker": EngineStageConfig,
+        "code2wav": MiniCPMOCode2WavStageConfig,
     }
 
     # note (MayDomine): each engine manages its own static memory fraction.
