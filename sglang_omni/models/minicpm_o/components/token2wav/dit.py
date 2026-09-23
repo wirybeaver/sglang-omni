@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
@@ -14,6 +15,58 @@ from einops import pack, repeat
 from torch.nn.attention.varlen import varlen_attn
 
 TIMESTEP_MAX_PERIOD = 10000
+
+
+@dataclass(frozen=True, kw_only=True)
+class PackedSequenceMetadata:
+    valid: torch.Tensor
+    cu_seqlens: torch.Tensor
+    max_length: int
+    conv_positions: torch.Tensor
+    conv_valid: torch.Tensor
+
+    @classmethod
+    def from_mask(
+        cls, mask: torch.Tensor, guard_width: int
+    ) -> "PackedSequenceMetadata":
+        valid = mask.squeeze(1).bool()
+        lengths = valid.sum(dim=1, dtype=torch.int32)
+        batch_size, max_length = valid.shape
+        cu_seqlens = F.pad(lengths.cumsum(0, dtype=torch.int32), (1, 0))
+        sequence_ids = torch.repeat_interleave(
+            torch.arange(batch_size, device=mask.device), lengths
+        )
+        packed_length = int(cu_seqlens[-1])
+        conv_positions = (
+            torch.arange(packed_length, device=mask.device)
+            + (sequence_ids + 1) * guard_width
+        )
+        conv_valid = torch.zeros(
+            packed_length + batch_size * guard_width,
+            device=mask.device,
+            dtype=torch.bool,
+        )
+        conv_valid[conv_positions] = True
+        return cls(
+            valid=valid,
+            cu_seqlens=cu_seqlens,
+            max_length=max_length,
+            conv_positions=conv_positions,
+            conv_valid=conv_valid,
+        )
+
+    def pack(self, x: torch.Tensor) -> torch.Tensor:
+        return x[self.valid]
+
+    def unpack(self, x: torch.Tensor) -> torch.Tensor:
+        batch_size, padded_length = self.valid.shape
+        dense = x.new_zeros(batch_size, padded_length, x.shape[-1])
+        dense[self.valid] = x
+        return dense
+
+    def repeat_conditioning(self, conditioning: torch.Tensor) -> torch.Tensor:
+        lengths = self.cu_seqlens.diff()
+        return torch.repeat_interleave(conditioning.squeeze(1), lengths, dim=0)
 
 
 class MLP(torch.nn.Module):
@@ -104,7 +157,7 @@ class Attention(torch.nn.Module):
         return x
 
     def forward_packed(
-        self, x: torch.Tensor, cu_seqlens: torch.Tensor, max_length: int
+        self, x: torch.Tensor, metadata: PackedSequenceMetadata
     ) -> torch.Tensor:
         q = self.to_q(x).view(-1, self.num_heads, self.head_dim)
         k = self.to_k(x).view(-1, self.num_heads, self.head_dim)
@@ -115,7 +168,15 @@ class Attention(torch.nn.Module):
         q = q.to(attention_dtype)
         k = k.to(attention_dtype)
         v = v.to(attention_dtype)
-        x = varlen_attn(q, k, v, cu_seqlens, cu_seqlens, max_length, max_length)
+        x = varlen_attn(
+            q,
+            k,
+            v,
+            metadata.cu_seqlens,
+            metadata.cu_seqlens,
+            metadata.max_length,
+            metadata.max_length,
+        )
         x = self.proj(x.reshape(-1, self.inner_dim))
         return self.proj_drop(x)
 
@@ -214,21 +275,20 @@ class CausalConvBlock(nn.Module):
     def forward_packed(
         self,
         x: torch.Tensor,
-        positions: torch.Tensor,
-        guarded_valid: torch.Tensor,
+        metadata: PackedSequenceMetadata,
     ) -> torch.Tensor:
-        guarded_length = guarded_valid.shape[0]
+        guarded_length = metadata.conv_valid.shape[0]
         guarded = x.new_zeros(guarded_length, x.shape[1])
-        guarded[positions] = x
+        guarded[metadata.conv_positions] = x
 
         guarded = self.block[1](guarded.transpose(0, 1).unsqueeze(0))
         guarded = guarded.squeeze(0).transpose(0, 1)
         guarded = self.block[3](guarded)
         guarded = self.block[4](guarded)
-        guarded = guarded * guarded_valid.unsqueeze(1)
+        guarded = guarded * metadata.conv_valid.unsqueeze(1)
         guarded = self.block[6](guarded.transpose(0, 1).unsqueeze(0))
         guarded = guarded.squeeze(0).transpose(0, 1)
-        return guarded[positions]
+        return guarded[metadata.conv_positions]
 
 
 class DiTBlock(nn.Module):
@@ -286,10 +346,7 @@ class DiTBlock(nn.Module):
         self,
         x: torch.Tensor,
         c: torch.Tensor,
-        cu_seqlens: torch.Tensor,
-        max_length: int,
-        conv_positions: torch.Tensor,
-        conv_valid: torch.Tensor,
+        metadata: PackedSequenceMetadata,
     ) -> torch.Tensor:
         (
             shift_msa,
@@ -304,13 +361,11 @@ class DiTBlock(nn.Module):
         ) = self.adaLN_modulation(c).chunk(9, dim=-1)
         x = x + gate_msa * self.attn.forward_packed(
             modulate(self.norm1(x), shift_msa, scale_msa),
-            cu_seqlens,
-            max_length,
+            metadata,
         )
         x = x + gate_conv * self.conv.forward_packed(
             modulate(self.norm3(x), shift_conv, scale_conv),
-            conv_positions,
-            conv_valid,
+            metadata,
         )
         x = x + gate_mlp * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
         return x
@@ -396,11 +451,15 @@ class DiT(nn.Module):
             x = pack([x, cond], "b * t")[0]
         x = x.transpose(1, 2)
         attn_mask = mask.bool()
-        lengths = attn_mask.squeeze(1).sum(dim=1, dtype=torch.int32)
         if self.enable_variable_length and x.shape[0] > 2:
+            metadata = PackedSequenceMetadata.from_mask(
+                attn_mask, self.blocks[0].conv.kernel_size - 1
+            )
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                packed_input = self.in_proj(x).to(torch.bfloat16)
-                return self.forward_packed(packed_input, t.to(torch.bfloat16), lengths)
+                packed_input = self.in_proj(metadata.pack(x)).to(torch.bfloat16)
+                return self.forward_packed(
+                    packed_input, t.to(torch.bfloat16), metadata
+                )
         x = self.in_proj(x)
         for block in self.blocks:
             x = block(x, t, attn_mask)
@@ -409,41 +468,13 @@ class DiT(nn.Module):
         return x
 
     def forward_packed(
-        self, x: torch.Tensor, conditioning: torch.Tensor, lengths: torch.Tensor
+        self,
+        x: torch.Tensor,
+        conditioning: torch.Tensor,
+        metadata: PackedSequenceMetadata,
     ) -> torch.Tensor:
-        batch_size, padded_length, _ = x.shape
-        valid = torch.arange(padded_length, device=x.device).unsqueeze(
-            0
-        ) < lengths.unsqueeze(1)
-        x = x[valid]
-        conditioning = torch.repeat_interleave(conditioning.squeeze(1), lengths, dim=0)
-        cu_seqlens = torch.nn.functional.pad(
-            lengths.cumsum(0, dtype=torch.int32), (1, 0)
-        )
-        max_length = padded_length
-        guard_width = self.blocks[0].conv.kernel_size - 1
-        sequence_ids = torch.repeat_interleave(
-            torch.arange(batch_size, device=x.device), lengths
-        )
-        conv_positions = (
-            torch.arange(x.shape[0], device=x.device) + (sequence_ids + 1) * guard_width
-        )
-        conv_valid = torch.zeros(
-            x.shape[0] + batch_size * guard_width,
-            device=x.device,
-            dtype=torch.bool,
-        )
-        conv_valid[conv_positions] = True
+        conditioning = metadata.repeat_conditioning(conditioning)
         for block in self.blocks:
-            x = block.forward_packed(
-                x,
-                conditioning,
-                cu_seqlens,
-                max_length,
-                conv_positions,
-                conv_valid,
-            )
+            x = block.forward_packed(x, conditioning, metadata)
         x = self.final_layer(x, conditioning)
-        dense = x.new_zeros(batch_size, padded_length, self.out_channels)
-        dense[valid] = x
-        return dense.transpose(1, 2)
+        return metadata.unpack(x).transpose(1, 2)

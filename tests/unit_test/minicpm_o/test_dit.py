@@ -3,7 +3,22 @@
 
 import torch
 
-from sglang_omni.models.minicpm_o.components.token2wav.dit import CausalConvBlock
+from sglang_omni.models.minicpm_o.components.token2wav.dit import (
+    CausalConvBlock,
+    PackedSequenceMetadata,
+)
+
+
+def test_packed_metadata_round_trips_valid_frames() -> None:
+    lengths = torch.tensor([3, 5, 2])
+    mask = torch.arange(5).unsqueeze(0) < lengths.unsqueeze(1)
+    metadata = PackedSequenceMetadata.from_mask(mask.unsqueeze(1), guard_width=2)
+    dense = torch.arange(3 * 5 * 4).reshape(3, 5, 4)
+
+    unpacked = metadata.unpack(metadata.pack(dense))
+
+    torch.testing.assert_close(unpacked[metadata.valid], dense[metadata.valid])
+    assert torch.count_nonzero(unpacked[~metadata.valid]) == 0
 
 
 def test_packed_causal_conv_preserves_sequence_boundaries() -> None:
@@ -13,11 +28,8 @@ def test_packed_causal_conv_preserves_sequence_boundaries() -> None:
 
     expected = torch.cat([block(row.unsqueeze(0)).squeeze(0) for row in rows])
     lengths = torch.tensor([len(row) for row in rows])
-    total_length = int(lengths.sum())
-    sequence_ids = torch.repeat_interleave(torch.arange(len(rows)), lengths)
-    positions = torch.arange(total_length) + (sequence_ids + 1) * 2
-    valid = torch.zeros(total_length + len(rows) * 2, dtype=torch.bool)
-    valid[positions] = True
-    actual = block.forward_packed(torch.cat(rows), positions, valid)
+    mask = torch.arange(int(lengths.max())).unsqueeze(0) < lengths.unsqueeze(1)
+    metadata = PackedSequenceMetadata.from_mask(mask.unsqueeze(1), guard_width=2)
+    actual = block.forward_packed(torch.cat(rows), metadata)
 
     torch.testing.assert_close(actual, expected)
