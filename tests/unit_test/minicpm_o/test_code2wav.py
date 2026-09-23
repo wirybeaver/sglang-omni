@@ -216,6 +216,8 @@ def test_speech_pipeline_enables_code2wav_batching_by_default() -> None:
     assert code2wav.factory.max_batch_size == 8
     assert code2wav.factory.max_batch_wait_ms == 0.0
     assert code2wav.factory.batch_wait_when_idle is False
+    assert code2wav.factory.dtype is None
+    assert code2wav.factory.enable_flow_variable_length is True
 
 
 def test_vocode_slices_waveforms_to_token_lengths() -> None:
