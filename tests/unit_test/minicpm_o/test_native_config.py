@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import inspect
 import json
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
@@ -14,6 +17,8 @@ from transformers.models.auto.configuration_auto import CONFIG_MAPPING
 from sglang_omni.models.minicpm_o import stages
 from sglang_omni.models.minicpm_o.components import audio_encoder, image_encoder
 from sglang_omni.models.minicpm_o.hf_config import MiniCPMOConfig
+from sglang_omni.proto import OmniRequest, StagePayload
+from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
 
 
 class ConfigLoaded(Exception):
@@ -113,3 +118,73 @@ def test_engine_factory_resolves_native_config_before_server_args(
     overrides = {} if trust_override is None else {"trust_remote_code": trust_override}
     with pytest.raises(ConfigLoaded):
         factory(str(snapshot), server_args_overrides=overrides)
+
+
+def test_preprocessing_executor_enables_bounded_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initialized: list[str] = []
+    schedulers: list[tuple[Callable[[StagePayload], Awaitable[StagePayload]], int]] = []
+    events: list[tuple[str, str]] = []
+
+    class Preprocessor:
+        def __init__(self, model_path: str, *, speech_enabled: bool) -> None:
+            self.model_path = model_path
+            self.speech_enabled = speech_enabled
+
+        @property
+        def processor(self) -> object:
+            initialized.append(self.model_path)
+            return object()
+
+        async def __call__(self, payload: StagePayload) -> StagePayload:
+            return payload
+
+    class Scheduler:
+        def __init__(
+            self,
+            compute_fn: Callable[[StagePayload], Awaitable[StagePayload]],
+            *,
+            max_concurrency: int,
+        ) -> None:
+            schedulers.append((compute_fn, max_concurrency))
+
+    monkeypatch.setattr(stages, "MiniCPMOPreprocessor", Preprocessor)
+    monkeypatch.setattr(stages, "ThreadedSimpleScheduler", Scheduler)
+    monkeypatch.setattr(
+        stages,
+        "emit_event",
+        lambda *, request_id, stage, event_name: events.append(
+            (request_id, event_name)
+        ),
+    )
+
+    serial = stages.create_preprocessing_executor("model", max_concurrency=1)
+    concurrent = stages.create_preprocessing_executor("model", max_concurrency=4)
+
+    assert isinstance(serial, SimpleScheduler)
+    assert isinstance(concurrent, Scheduler)
+    assert len(schedulers) == 1
+    assert schedulers[0][1] == 4
+    assert initialized == ["model"]
+
+    payload = StagePayload(
+        request_id="request",
+        request=OmniRequest(inputs={}),
+        data=None,
+    )
+    assert asyncio.run(schedulers[0][0](payload)) is payload
+    assert events == [
+        ("request", "preprocess_start"),
+        ("request", "preprocess_end"),
+    ]
+
+
+def test_preprocessing_concurrency_is_enabled_by_default() -> None:
+    signature = inspect.signature(stages.create_preprocessing_executor)
+    assert signature.parameters["max_concurrency"].default == 4
+
+
+def test_preprocessing_executor_rejects_invalid_concurrency() -> None:
+    with pytest.raises(ValueError, match="max_concurrency must be >= 1"):
+        stages.create_preprocessing_executor("model", max_concurrency=0)
