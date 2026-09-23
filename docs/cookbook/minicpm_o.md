@@ -37,6 +37,10 @@ Token2wav uses the checkpoint's `assets/HT_ref_audio.wav` when available.
 The vocoder keeps an LRU cache of up to 32 speaker references, so switching back
 to a cached reference reuses its conditioning. Inline references are keyed by
 audio content; file references account for file metadata. Flow inference batches
-different references and token lengths together. HiFT groups rows by generated
-length to preserve waveform boundaries. Invalid references fail instead of
-silently using the default. Audio output remains non-streaming.
+different references and token lengths together, then partitions each outer
+batch into the fewest length-sorted Flow groups whose total padding stays within
+25% and whose group length gap is at most 384 mel frames. HiFT groups rows by
+generated length to preserve waveform boundaries. Override the Flow policy with
+`--code2wav.factory.flow_merge_max_gap_frames` and
+`--code2wav.factory.flow_merge_pad_budget_percent`. Invalid references fail
+instead of silently using the default. Audio output remains non-streaming.

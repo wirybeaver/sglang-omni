@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
 from collections import OrderedDict
 from collections.abc import Sequence
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +25,74 @@ OUTPUT_SAMPLE_RATE = 24000
 CODEC_TOKEN_RATE = 25
 SAMPLES_PER_CODEC_TOKEN = OUTPUT_SAMPLE_RATE // CODEC_TOKEN_RATE
 
+logger = logging.getLogger(__name__)
+
+
+def plan_flow_groups(
+    frame_lengths: Sequence[int],
+    *,
+    max_gap_frames: int,
+    pad_budget_percent: float,
+) -> list[list[int]]:
+    """Partition length-sorted rows into the fewest groups within a pad budget."""
+    if max_gap_frames < 0:
+        raise ValueError("Flow merge max gap must be non-negative")
+    if pad_budget_percent < 0:
+        raise ValueError("Flow merge pad budget must be non-negative")
+    if any(length <= 0 for length in frame_lengths):
+        raise ValueError("Flow frame lengths must be positive")
+
+    ordered = tuple(
+        sorted(enumerate(frame_lengths), key=lambda item: (item[1], item[0]))
+    )
+    if not ordered:
+        return []
+    baseline_work = sum(frame_lengths)
+    row_count = len(ordered)
+
+    @lru_cache(maxsize=None)
+    def optimal_partition(
+        start: int, groups_left: int, max_group_gap: int
+    ) -> tuple[int, int, tuple[int, ...]] | None:
+        if groups_left == 0:
+            return (0, max_group_gap, ()) if start == row_count else None
+        if row_count - start < groups_left:
+            return None
+
+        best: tuple[int, int, tuple[int, ...]] | None = None
+        shortest = ordered[start][1]
+        end_limit = row_count - groups_left + 1
+        for end in range(start + 1, end_limit + 1):
+            longest = ordered[end - 1][1]
+            gap = longest - shortest
+            if gap > max_gap_frames:
+                break
+            suffix = optimal_partition(end, groups_left - 1, max(max_group_gap, gap))
+            if suffix is None:
+                continue
+            candidate = (
+                (end - start) * longest + suffix[0],
+                suffix[1],
+                (end,) + suffix[2],
+            )
+            if best is None or candidate < best:
+                best = candidate
+        return best
+
+    for group_count in range(1, row_count + 1):
+        plan = optimal_partition(0, group_count, 0)
+        if (
+            plan is not None
+            and (plan[0] / baseline_work - 1) * 100 <= pad_budget_percent + 1e-9
+        ):
+            start = 0
+            groups = []
+            for end in plan[2]:
+                groups.append([index for index, _ in ordered[start:end]])
+                start = end
+            return groups
+    raise AssertionError("positive Flow frame lengths must have a feasible partition")
+
 
 class MiniCPMOCode2Wav(nn.Module):
     """Convert codec tokens into a float32 waveform with Token2wav."""
@@ -35,6 +105,8 @@ class MiniCPMOCode2Wav(nn.Module):
         dtype: str | torch.dtype | None = None,
         n_timesteps: int = 10,
         prompt_wav: str | None = None,
+        flow_merge_max_gap_frames: int = 384,
+        flow_merge_pad_budget_percent: float = 25.0,
     ) -> None:
         super().__init__()
         from sglang_omni.models.minicpm_o.components.token2wav.vocoder import Token2Wav
@@ -70,6 +142,8 @@ class MiniCPMOCode2Wav(nn.Module):
             default_wav = os.path.join(model_dir, "assets", "HT_ref_audio.wav")
             prompt_wav = default_wav if os.path.isfile(default_wav) else None
         self.default_prompt_wav = prompt_wav
+        self.flow_merge_max_gap_frames = flow_merge_max_gap_frames
+        self.flow_merge_pad_budget_percent = flow_merge_pad_budget_percent
         # Keyed by reference so a mixed-reference batch never thrashes one slot.
         self.prompt_cache: OrderedDict[str, tuple] = OrderedDict()
         self.prompt_cache_capacity = 32
@@ -150,79 +224,103 @@ class MiniCPMOCode2Wav(nn.Module):
 
         token_lens = [len(tokens) for tokens in token_sequences]
         device = self.token2wav.device
-        speech_tokens = pad_sequence(
-            [
-                torch.tensor(tokens, dtype=torch.int32, device=device)
-                for tokens in token_sequences
-            ],
-            batch_first=True,
-        )
-        speech_tokens_lens = torch.tensor(token_lens, dtype=torch.int32, device=device)
-
-        # Stack one conditioning row per reference; a shared reference broadcasts
-        # instead of copying, and mixed references concatenate along the batch.
-        # References of different lengths pad to a common token width here; the
-        # flow re-derives each row's real width from prompt_speech_tokens_lens.
         prompts = [self.speaker_prompt(reference) for reference in references]
-        if len({id(prompt) for prompt in prompts}) == 1:
-            (
-                prompt_speech_tokens,
-                prompt_speech_tokens_lens,
-                speaker_embedding,
-                prompt_mels,
-            ) = prompts[0]
-            prompt_speech_tokens = prompt_speech_tokens.expand(
-                batch_size, -1
-            ).contiguous()
-            prompt_speech_tokens_lens = prompt_speech_tokens_lens.expand(
-                batch_size
-            ).contiguous()
-            speaker_embedding = speaker_embedding.expand(batch_size, -1).contiguous()
-            prompt_mels = prompt_mels.expand(batch_size, -1, -1).contiguous()
-        else:
-            # References of different lengths pad to a common token width; the
-            # flow re-derives each row's real width from prompt_speech_tokens_lens.
-            token_width = max(prompt[0].numel() for prompt in prompts)
-            prompt_speech_tokens = torch.cat(
-                [
-                    torch.nn.functional.pad(
-                        prompt[0].reshape(1, -1), (0, token_width - prompt[0].numel())
-                    )
-                    for prompt in prompts
-                ],
-                dim=0,
-            )
-            prompt_speech_tokens_lens = torch.cat(
-                [prompt[1] for prompt in prompts], dim=0
-            )
-            speaker_embedding = torch.cat([prompt[2] for prompt in prompts], dim=0)
-            mel_frames = max(prompt[3].shape[1] for prompt in prompts)
-            prompt_mels = torch.cat(
-                [
-                    torch.nn.functional.pad(
-                        prompt[3], (0, 0, 0, mel_frames - prompt[3].shape[1])
-                    )
-                    for prompt in prompts
-                ],
-                dim=0,
-            )
-
-        with torch.amp.autocast(
-            "cuda",
-            dtype=self.token2wav.dtype,
-            enabled=self.token2wav.dtype != torch.float32,
-        ):
-            mel = self.token2wav.flow.inference(
-                speech_tokens,
-                speech_tokens_lens,
-                prompt_speech_tokens,
-                prompt_speech_tokens_lens,
-                prompt_mels,
-                speaker_embedding,
-                self.token2wav.n_timesteps,
-            )
-
         up_rate = self.token2wav.flow.up_rate
+        frame_lengths = [
+            (int(prompt[1][0]) + token_len) * up_rate
+            for prompt, token_len in zip(prompts, token_lens, strict=True)
+        ]
+        flow_groups = plan_flow_groups(
+            frame_lengths,
+            max_gap_frames=self.flow_merge_max_gap_frames,
+            pad_budget_percent=self.flow_merge_pad_budget_percent,
+        )
+        grouped_work = sum(
+            len(indices) * max(frame_lengths[index] for index in indices)
+            for indices in flow_groups
+        )
+        logger.info(
+            f"MiniCPM-o Flow grouped rows={batch_size} groups={len(flow_groups)} "
+            f"frames={frame_lengths} padding={(grouped_work / sum(frame_lengths) - 1) * 100:.1f}%"
+        )
+
+        mel_rows: dict[int, torch.Tensor] = {}
+        for indices in flow_groups:
+            speech_tokens = pad_sequence(
+                [
+                    torch.tensor(
+                        token_sequences[index], dtype=torch.int32, device=device
+                    )
+                    for index in indices
+                ],
+                batch_first=True,
+            )
+            speech_tokens_lens = torch.tensor(
+                [token_lens[index] for index in indices],
+                dtype=torch.int32,
+                device=device,
+            )
+            group_prompts = [prompts[index] for index in indices]
+            if len({id(prompt) for prompt in group_prompts}) == 1:
+                (
+                    prompt_speech_tokens,
+                    prompt_speech_tokens_lens,
+                    speaker_embedding,
+                    prompt_mels,
+                ) = group_prompts[0]
+                group_size = len(indices)
+                prompt_speech_tokens = prompt_speech_tokens.expand(
+                    group_size, -1
+                ).contiguous()
+                prompt_speech_tokens_lens = prompt_speech_tokens_lens.expand(
+                    group_size
+                ).contiguous()
+                speaker_embedding = speaker_embedding.expand(
+                    group_size, -1
+                ).contiguous()
+                prompt_mels = prompt_mels.expand(group_size, -1, -1).contiguous()
+            else:
+                token_width = max(prompt[0].numel() for prompt in group_prompts)
+                prompt_speech_tokens = torch.cat(
+                    [
+                        torch.nn.functional.pad(
+                            prompt[0].reshape(1, -1),
+                            (0, token_width - prompt[0].numel()),
+                        )
+                        for prompt in group_prompts
+                    ]
+                )
+                prompt_speech_tokens_lens = torch.cat(
+                    [prompt[1] for prompt in group_prompts]
+                )
+                speaker_embedding = torch.cat([prompt[2] for prompt in group_prompts])
+                mel_frames = max(prompt[3].shape[1] for prompt in group_prompts)
+                prompt_mels = torch.cat(
+                    [
+                        torch.nn.functional.pad(
+                            prompt[3], (0, 0, 0, mel_frames - prompt[3].shape[1])
+                        )
+                        for prompt in group_prompts
+                    ]
+                )
+
+            with torch.amp.autocast(
+                "cuda",
+                dtype=self.token2wav.dtype,
+                enabled=self.token2wav.dtype != torch.float32,
+            ):
+                group_mel = self.token2wav.flow.inference(
+                    speech_tokens,
+                    speech_tokens_lens,
+                    prompt_speech_tokens,
+                    prompt_speech_tokens_lens,
+                    prompt_mels,
+                    speaker_embedding,
+                    self.token2wav.n_timesteps,
+                )
+            for row, index in enumerate(indices):
+                mel_rows[index] = group_mel[row, :, : token_lens[index] * up_rate]
+
         length_groups: dict[int, list[int]] = {}
         for idx, token_len in enumerate(token_lens):
             length_groups.setdefault(token_len, []).append(idx)
@@ -230,7 +328,7 @@ class MiniCPMOCode2Wav(nn.Module):
         waveform_rows: dict[int, torch.Tensor] = {}
         # note (MayDomine): padding changes HiFT's noncausal convolution boundaries.
         for token_len, indices in length_groups.items():
-            speech_feat = mel[indices, :, : token_len * up_rate].float().contiguous()
+            speech_feat = torch.stack([mel_rows[index] for index in indices]).float()
             wav, _ = self.token2wav.hift(speech_feat=speech_feat)
             for row, idx in enumerate(indices):
                 waveform_rows[idx] = wav[row].reshape(-1)[
