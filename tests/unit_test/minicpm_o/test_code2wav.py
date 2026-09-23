@@ -20,6 +20,7 @@ import torch
 from sglang_omni.models.minicpm_o.components.code2wav import (
     SAMPLES_PER_CODEC_TOKEN,
     MiniCPMOCode2Wav,
+    plan_flow_groups,
 )
 from sglang_omni.models.minicpm_o.components.token2wav.dit import TimestepEmbedder
 from sglang_omni.models.minicpm_o.config import MiniCPMOSpeechPipelineConfig
@@ -216,6 +217,8 @@ def test_speech_pipeline_enables_code2wav_batching_by_default() -> None:
     assert code2wav.factory.max_batch_size == 8
     assert code2wav.factory.max_batch_wait_ms == 0.0
     assert code2wav.factory.batch_wait_when_idle is False
+    assert code2wav.factory.flow_merge_max_gap_frames == 384
+    assert code2wav.factory.flow_merge_pad_budget_percent == 25.0
 
 
 def test_vocode_slices_waveforms_to_token_lengths() -> None:
@@ -245,6 +248,8 @@ def test_vocode_slices_waveforms_to_token_lengths() -> None:
         flow=FakeFlow(),
         hift=FakeHiFT(),
     )
+    model.flow_merge_max_gap_frames = 384
+    model.flow_merge_pad_budget_percent = 25.0
     model.speaker_prompt = lambda prompt_wav: (
         torch.zeros(1, 1, dtype=torch.int32),
         torch.tensor([1], dtype=torch.int32),
@@ -285,6 +290,9 @@ def _batch_model() -> MiniCPMOCode2Wav:
     class FakeFlow:
         up_rate = 2
 
+        def __init__(self) -> None:
+            self.calls: list[tuple[list[int], list[int]]] = []
+
         def inference(
             self,
             speech_tokens: torch.Tensor,
@@ -295,6 +303,9 @@ def _batch_model() -> MiniCPMOCode2Wav:
             speaker_embedding: torch.Tensor,
             n_timesteps: int,
         ) -> torch.Tensor:
+            self.calls.append(
+                (speech_tokens_lens.tolist(), prompt_tokens_lens.tolist())
+            )
             frames = (speech_tokens_lens + prompt_tokens_lens).max() * self.up_rate
             return torch.zeros(speech_tokens.shape[0], 80, frames)
 
@@ -322,10 +333,24 @@ def _batch_model() -> MiniCPMOCode2Wav:
         )
 
     model.speaker_prompt = speaker_prompt
+    model.flow_merge_max_gap_frames = 384
+    model.flow_merge_pad_budget_percent = 25.0
     return model
 
 
-def test_vocode_mixed_references_and_lengths_share_one_batch() -> None:
+def test_flow_group_planner_splits_outlier_and_restores_input_indices() -> None:
+    assert plan_flow_groups(
+        [240, 80, 100, 120], max_gap_frames=384, pad_budget_percent=25
+    ) == [[1, 2, 3], [0]]
+
+
+def test_flow_group_planner_uses_fewest_groups_within_budget() -> None:
+    assert plan_flow_groups(
+        [100, 100, 120], max_gap_frames=384, pad_budget_percent=25
+    ) == [[0, 1, 2]]
+
+
+def test_vocode_groups_mixed_references_and_lengths() -> None:
     model = _batch_model()
     waveforms = model.vocode([[1, 2], [3, 4, 5], [6]], [b"ref", b"other", b"ref"])
     assert [wave.shape for wave in waveforms] == [
@@ -333,6 +358,7 @@ def test_vocode_mixed_references_and_lengths_share_one_batch() -> None:
         (3 * SAMPLES_PER_CODEC_TOKEN,),
         (SAMPLES_PER_CODEC_TOKEN,),
     ]
+    assert model.token2wav.flow.calls == [([1, 2], [1, 1]), ([3], [3])]
 
 
 def test_vocode_mixed_lengths_preserve_hift_boundaries() -> None:
