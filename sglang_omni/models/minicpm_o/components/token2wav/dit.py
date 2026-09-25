@@ -9,7 +9,6 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Lock
-from types import MethodType
 
 import torch
 import torch.nn as nn
@@ -405,11 +404,6 @@ class DiT(nn.Module):
         )
         for block in self.blocks:
             block.forward_packed = MethodType(compiled, block)
-    def enable_compiled_blocks(self) -> None:
-        """Compile the shared block forward for inference."""
-        compiled = torch.compile(DiTBlock.forward, dynamic=True)
-        for block in self.blocks:
-            block.forward = MethodType(compiled, block)
 
     @torch.inference_mode()
     def warmup_compiled_packed_blocks(self) -> None:
