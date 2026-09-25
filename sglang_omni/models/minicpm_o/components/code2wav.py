@@ -63,7 +63,8 @@ class MiniCPMOCode2Wav(nn.Module):
         enable_packed_dit_torch_compile: bool = True,
         enable_dit_torch_compile: bool = True,
         enable_flow_cuda_graph: bool = True,
-        flow_cuda_graph_capture_shapes: tuple[tuple[int, ...], ...] | None = None,
+        flow_cuda_graph_capture_shapes: tuple[tuple[int, int], ...] | None = None,
+        packed_dit_cuda_graph_capture_shapes: tuple[tuple[int, int], ...] | None = None,
     ) -> None:
         super().__init__()
         self.prompt_cache_capacity: int = positive_int_env(
@@ -120,6 +121,7 @@ class MiniCPMOCode2Wav(nn.Module):
                 enable_dit_torch_compile=enable_dit_torch_compile,
                 enable_flow_cuda_graph=enable_flow_cuda_graph,
                 flow_cuda_graph_capture_shapes=flow_cuda_graph_capture_shapes,
+                packed_dit_cuda_graph_capture_shapes=packed_dit_cuda_graph_capture_shapes,
             )
 
         if prompt_wav is None:
