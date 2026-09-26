@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import math
 import os
 import subprocess
@@ -22,6 +23,7 @@ import pytest
 import soundfile as sf
 import torch
 
+from sglang_omni.config.manager import ConfigManager
 from sglang_omni.models.minicpm_o import stages
 from sglang_omni.models.minicpm_o.components.code2wav import (
     SAMPLES_PER_CODEC_TOKEN,
@@ -29,6 +31,10 @@ from sglang_omni.models.minicpm_o.components.code2wav import (
 )
 from sglang_omni.models.minicpm_o.components.token2wav import vocoder
 from sglang_omni.models.minicpm_o.components.token2wav.dit import TimestepEmbedder
+from sglang_omni.models.minicpm_o.components.token2wav.flow_graph_shapes import (
+    SEEDTTS_EN_DENSE_PACKED_DIT_CUDA_GRAPH_SHAPES,
+    build_default_flow_cuda_graph_shapes,
+)
 from sglang_omni.models.minicpm_o.config import (
     MiniCPMOCode2WavFactoryArgs,
     MiniCPMOSpeechPipelineConfig,
@@ -341,6 +347,66 @@ def test_speech_pipeline_enables_code2wav_batching_by_default() -> None:
         ).enable_packed_dit_torch_compile
         is False
     )
+    assert code2wav.factory.enable_flow_cuda_graph is True
+    assert code2wav.factory.flow_cuda_graph_capture_shapes is None
+    assert code2wav.factory.packed_dit_cuda_graph_capture_shapes is None
+
+
+def test_speech_pipeline_parses_flow_execution_options() -> None:
+    config = MiniCPMOSpeechPipelineConfig(model_path="unused")
+    merged = ConfigManager(config).merge_config(
+        [
+            ("code2wav.factory.enable_flow_cuda_graph", "false"),
+            (
+                "code2wav.factory.flow_cuda_graph_capture_shapes",
+                "[[1,256],[1,512]]",
+            ),
+            ("code2wav.factory.packed_dit_cuda_graph_capture_shapes", "[[2,1856]]"),
+        ]
+    )
+    code2wav = next(stage for stage in merged.stages if stage.name == "code2wav")
+    assert code2wav.factory.enable_flow_cuda_graph is False
+    assert code2wav.factory.flow_cuda_graph_capture_shapes == (
+        (1, 256),
+        (1, 512),
+    )
+    assert code2wav.factory.packed_dit_cuda_graph_capture_shapes == ((2, 1856),)
+
+
+def test_seedtts_en_dense_graph_tables_can_be_selected_explicitly() -> None:
+    packed_shapes = SEEDTTS_EN_DENSE_PACKED_DIT_CUDA_GRAPH_SHAPES
+    flow_shapes = build_default_flow_cuda_graph_shapes()
+    assert len(flow_shapes) == 141
+    assert sum(batch == 1 for batch, _ in flow_shapes) == 44
+    assert len(packed_shapes) == len(set(packed_shapes)) == 46
+    config = MiniCPMOSpeechPipelineConfig(model_path="unused")
+    merged = ConfigManager(config).merge_config(
+        [
+            (
+                "code2wav.factory.flow_cuda_graph_capture_shapes",
+                json.dumps(flow_shapes),
+            ),
+            (
+                "code2wav.factory.packed_dit_cuda_graph_capture_shapes",
+                json.dumps(packed_shapes),
+            ),
+        ]
+    )
+    code2wav = next(stage for stage in merged.stages if stage.name == "code2wav")
+    assert code2wav.factory.flow_cuda_graph_capture_shapes == flow_shapes
+    assert code2wav.factory.packed_dit_cuda_graph_capture_shapes == packed_shapes
+
+
+def test_packed_graph_table_requires_variable_length_flow() -> None:
+    with pytest.raises(
+        ValueError, match="Packed DiT CUDA graph shapes require variable-length Flow"
+    ):
+        vocoder.Token2Wav(
+            Path("unused"),
+            device=torch.device("cpu"),
+            enable_flow_variable_length=False,
+            packed_dit_cuda_graph_capture_shapes=((2, 128),),
+        )
 
 
 def test_vocode_slices_waveforms_to_token_lengths() -> None:

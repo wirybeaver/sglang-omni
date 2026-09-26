@@ -110,13 +110,16 @@ def talker_stage(*, gpu: int, process: str) -> StageConfig:
 
 
 class MiniCPMOCode2WavFactoryArgs(FactoryArgs):
-    """Validated default-on packed DiT compilation."""
+    """Code2Wav compiler and Flow graph settings."""
 
     enable_packed_dit_torch_compile: bool = True
+    enable_flow_cuda_graph: bool = True
+    flow_cuda_graph_capture_shapes: tuple[tuple[int, int], ...] | None = None
+    packed_dit_cuda_graph_capture_shapes: tuple[tuple[int, int], ...] | None = None
 
 
 class MiniCPMOCode2WavStageConfig(StageConfig):
-    """Code2Wav stage with typed compiler settings."""
+    """Typed Code2Wav compiler and graph options."""
 
     factory: MiniCPMOCode2WavFactoryArgs = Field(
         default_factory=MiniCPMOCode2WavFactoryArgs

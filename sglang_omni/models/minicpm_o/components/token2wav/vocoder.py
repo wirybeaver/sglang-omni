@@ -25,7 +25,17 @@ from sglang_omni.models.minicpm_o.components.token2wav.flow import (
     CausalConditionalCFM,
     CausalMaskedDiffWithXvec,
 )
+from sglang_omni.models.minicpm_o.components.token2wav.flow_cuda_graph import (
+    FlowCudaGraphRunner,
+)
+from sglang_omni.models.minicpm_o.components.token2wav.flow_graph_shapes import (
+    SEEDTTS_EN_DENSE_PACKED_DIT_CUDA_GRAPH_SHAPES,
+    build_default_flow_cuda_graph_shapes,
+)
 from sglang_omni.models.minicpm_o.components.token2wav.hift import HiFTGenerator
+from sglang_omni.models.minicpm_o.components.token2wav.packed_dit_cuda_graph import (
+    PackedDiTCudaGraphRunner,
+)
 from sglang_omni.models.minicpm_o.components.token2wav.speech_tokenizer import (
     S3TokenizerV2,
 )
@@ -105,10 +115,23 @@ class Token2Wav(torch.nn.Module):
         n_timesteps: int = 10,
         enable_flow_variable_length: bool = False,
         enable_packed_dit_torch_compile: bool = True,
+        enable_flow_cuda_graph: bool = True,
+        flow_cuda_graph_capture_shapes: tuple[tuple[int, int], ...] | None = None,
+        packed_dit_cuda_graph_capture_shapes: tuple[tuple[int, int], ...] | None = None,
     ) -> None:
         super().__init__()
         if n_timesteps <= 0:
             raise ValueError("n_timesteps must be positive")
+        else:
+            pass
+        if (
+            enable_flow_cuda_graph
+            and packed_dit_cuda_graph_capture_shapes
+            and not enable_flow_variable_length
+        ):
+            raise ValueError(
+                "Packed DiT CUDA graph shapes require variable-length Flow"
+            )
         else:
             pass
         self.device = device
@@ -155,6 +178,33 @@ class Token2Wav(torch.nn.Module):
         self.hift.to(device).eval()
         if enable_packed_dit_torch_compile and enable_flow_variable_length:
             self.flow.decoder.estimator.warmup_compiled_packed_blocks()
+        else:
+            pass
+        if enable_flow_cuda_graph:
+            flow_graph_shapes = (
+                build_default_flow_cuda_graph_shapes()
+                if flow_cuda_graph_capture_shapes is None
+                else flow_cuda_graph_capture_shapes
+            )
+            packed_graph_shapes = (
+                SEEDTTS_EN_DENSE_PACKED_DIT_CUDA_GRAPH_SHAPES
+                if packed_dit_cuda_graph_capture_shapes is None
+                else packed_dit_cuda_graph_capture_shapes
+            )
+            if packed_graph_shapes and enable_flow_variable_length:
+                packed_runner = PackedDiTCudaGraphRunner(
+                    self.flow.decoder.estimator, device=device
+                )
+                packed_runner.capture(packed_graph_shapes)
+                self.flow.decoder.estimator.packed_graph_runner = packed_runner
+            else:
+                pass
+            if flow_graph_shapes:
+                runner = FlowCudaGraphRunner(self.flow.decoder, device=device)
+                runner.capture(flow_graph_shapes)
+                self.flow.decoder.graph_runner = runner
+            else:
+                pass
         else:
             pass
 
