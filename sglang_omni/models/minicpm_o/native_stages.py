@@ -245,6 +245,8 @@ def create_speech_scheduler(
         device=device,
         prompt_wav=reference_audio,
         enable_flow_variable_length=False,
+        decode_stream_priority=0,
+        enable_flow_block_compile=False,
         reference_workers=1,
         prompt_cache_capacity=max_open_sessions,
     )
