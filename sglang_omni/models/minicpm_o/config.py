@@ -18,6 +18,8 @@ from sglang_omni.models.minicpm_o.native_config import MiniCPMODuplexPipelineCon
 
 PKG = "sglang_omni.models.minicpm_o"
 THINKER_STAGE = "thinker"
+# PyTorch gives a smaller value higher priority, so this runs ahead of the default stream.
+CODE2WAV_DECODE_STREAM_PRIORITY = -1
 
 
 def preprocessing_stage(*, process: str) -> StageConfig:
@@ -130,7 +132,7 @@ def code2wav_stage(*, gpu: int, process: str) -> StageConfig:
             enable_flow_variable_length=False,
             reference_workers=8,
             prompt_cache_capacity=32,
-            decode_stream_priority=-1,
+            decode_stream_priority=CODE2WAV_DECODE_STREAM_PRIORITY,
             enable_flow_block_compile=True,
         ),
         # Note (Chenyang): As a general comment and my usual understanding
