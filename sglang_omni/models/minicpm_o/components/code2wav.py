@@ -369,38 +369,42 @@ class MiniCPMOCode2Wav(nn.Module):
         else:
             pass
 
-        prompts = self.prepare_references(references)
+        speaker_prompts = self.prepare_references(references)
         device_module = torch.get_device_module(self.token2wav.device)
         with device_module.stream(self.decode_stream):
-            return self.decode_waveforms(token_sequences, prompts)
+            return self.decode_waveforms(token_sequences, speaker_prompts)
 
     def decode_waveforms(
         self,
         token_sequences: Sequence[Sequence[int]],
-        prompts: Sequence[SpeakerPrompt],
+        speaker_prompts: Sequence[SpeakerPrompt],
     ) -> list[np.ndarray]:
         """Run flow and HiFT. The caller selects the decode stream."""
-        device = self.token2wav.device
+        token2wav_device = self.token2wav.device
         token_lengths = [len(tokens) for tokens in token_sequences]
         speech_tokens = pad_sequence(
             [torch.tensor(tokens, dtype=torch.int32) for tokens in token_sequences],
             batch_first=True,
-        ).to(device)
+        ).to(token2wav_device)
         speech_token_lengths = torch.tensor(
-            token_lengths, dtype=torch.int32, device=device
+            token_lengths, dtype=torch.int32, device=token2wav_device
         )
-        mel = self.flow_mel(speech_tokens, speech_token_lengths, prompts)
+        mel = self.flow_mel(speech_tokens, speech_token_lengths, speaker_prompts)
 
-        up_rate = self.token2wav.flow.up_rate
+        mel_upsample_rate = self.token2wav.flow.up_rate
         rows_by_token_length: defaultdict[int, list[int]] = defaultdict(list)
         for row, token_length in enumerate(token_lengths):
             rows_by_token_length[token_length].append(row)
         waveforms_by_row: dict[int, torch.Tensor] = {}
         # note (MayDomine): padding changes HiFT's noncausal convolution boundaries.
-        for token_length, rows in rows_by_token_length.items():
-            speech_mel = mel[rows, :, : token_length * up_rate].float().contiguous()
+        for token_length, row_indices in rows_by_token_length.items():
+            speech_mel = (
+                mel[row_indices, :, : token_length * mel_upsample_rate]
+                .float()
+                .contiguous()
+            )
             group_waveforms, _ = self.token2wav.hift(speech_feat=speech_mel)
-            for group_row, row in enumerate(rows):
+            for group_row, row in enumerate(row_indices):
                 waveforms_by_row[row] = group_waveforms[group_row].reshape(-1)[
                     : token_length * SAMPLES_PER_CODEC_TOKEN
                 ]
