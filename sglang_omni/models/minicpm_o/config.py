@@ -18,7 +18,7 @@ from sglang_omni.models.minicpm_o.native_config import MiniCPMODuplexPipelineCon
 
 PKG = "sglang_omni.models.minicpm_o"
 THINKER_STAGE = "thinker"
-# PyTorch gives a smaller value higher priority, so this runs ahead of the default stream.
+# note (zhaochenyang20): Lower stream priority values run ahead of the default stream.
 CODE2WAV_DECODE_STREAM_PRIORITY = -1
 
 

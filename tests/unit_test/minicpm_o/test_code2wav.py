@@ -131,8 +131,8 @@ class OfflineCudaStream:
     def __init__(
         self, *, priority: int, device: torch.device | int | None = None
     ) -> None:
-        self.priority = priority
-        self.device = device
+        self.priority: int = priority
+        self.device: torch.device | int | None = device
         self.earlier_stream: OfflineCudaStream | None = None
 
     def wait_stream(self, earlier_stream: OfflineCudaStream) -> None:
@@ -485,6 +485,8 @@ def compiled_vocoder() -> Iterator[MiniCPMOCode2Wav]:
         enable_flow_variable_length=factory.enable_flow_variable_length,
         reference_workers=factory.reference_workers,
         prompt_cache_capacity=factory.prompt_cache_capacity,
+        decode_stream_priority=-1,
+        enable_flow_block_compile=False,
     )
     yield model
     model.close_reference_pool()
@@ -528,6 +530,8 @@ def test_dit_torch_compile_rejects_non_cuda_device() -> None:
             enable_flow_variable_length=True,
             reference_workers=8,
             prompt_cache_capacity=32,
+            decode_stream_priority=-1,
+            enable_flow_block_compile=False,
         )
 
 
