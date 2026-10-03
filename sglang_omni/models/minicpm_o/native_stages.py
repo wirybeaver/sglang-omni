@@ -247,6 +247,8 @@ def create_speech_scheduler(
         enable_flow_variable_length=False,
         decode_stream_priority=0,
         enable_flow_block_compile=False,
+        enable_flow_cuda_graph=False,
+        flow_cuda_graph_capture_shapes=(),
         reference_workers=1,
         prompt_cache_capacity=max_open_sessions,
     )
