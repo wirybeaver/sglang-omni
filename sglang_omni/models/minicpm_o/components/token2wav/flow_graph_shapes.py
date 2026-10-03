@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Capture tables for MiniCPM-o dense Flow."""
+"""Capture tables for MiniCPM-o Flow and packed DiT."""
 
 from __future__ import annotations
 
@@ -70,3 +70,60 @@ def build_default_flow_cuda_graph_shapes() -> tuple[tuple[int, int], ...]:
             for frames in frame_buckets
         ),
     )
+
+
+# note (wirybeaver): Nearby capacities cover zero-wait tails with few dummy frames.
+SEEDTTS_EN_DENSE_PACKED_DIT_CUDA_GRAPH_SHAPES: tuple[tuple[int, int], ...] = (
+    (2, 1280),
+    (2, 1616),
+    (2, 1744),
+    (2, 1936),
+    (2, 2080),
+    (2, 2144),
+    (2, 2448),
+    (2, 2592),
+    (3, 2000),
+    (3, 2080),
+    (3, 2496),
+    (3, 2688),
+    (3, 3072),
+    (3, 3088),
+    (3, 3392),
+    (4, 2784),
+    (4, 3216),
+    (4, 3520),
+    (4, 3936),
+    (4, 4048),
+    (4, 4432),
+    (5, 3216),
+    (5, 3760),
+    (5, 4128),
+    (5, 4192),
+    (5, 4592),
+    (5, 4944),
+    (5, 5376),
+    (5, 5456),
+    (6, 4736),
+    (6, 5248),
+    (6, 5376),
+    (6, 5424),
+    (6, 5680),
+    (6, 5888),
+    (6, 6464),
+    (7, 4944),
+    (7, 5520),
+    (7, 5552),
+    (7, 6032),
+    (7, 6384),
+    (7, 6448),
+    (7, 6736),
+    (7, 7136),
+    (7, 7296),
+    (8, 6352),
+    (8, 6832),
+    (8, 6896),
+    (8, 7440),
+    (8, 7616),
+    (8, 7760),
+    (8, 8416),
+)
