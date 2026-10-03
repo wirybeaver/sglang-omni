@@ -168,6 +168,7 @@ def build_code2wav_model(
             enable_flow_variable_length=enable_flow_variable_length,
             enable_flow_cuda_graph=False,
             flow_cuda_graph_capture_shapes=(),
+            packed_dit_cuda_graph_capture_shapes=(),
             reference_workers=reference_workers,
             prompt_cache_capacity=prompt_cache_capacity,
         )
@@ -255,6 +256,7 @@ def build_code2wav_stage(
         enable_dit_torch_compile=factory.enable_dit_torch_compile,
         enable_flow_cuda_graph=factory.enable_flow_cuda_graph,
         flow_cuda_graph_capture_shapes=factory.flow_cuda_graph_capture_shapes,
+        packed_dit_cuda_graph_capture_shapes=factory.packed_dit_cuda_graph_capture_shapes,
         enable_flow_variable_length=factory.enable_flow_variable_length,
         reference_workers=factory.reference_workers,
         prompt_cache_capacity=factory.prompt_cache_capacity,
@@ -271,6 +273,7 @@ def load_checkpoint_model(
         enable_flow_variable_length=enable_flow_variable_length,
         enable_flow_cuda_graph=False,
         flow_cuda_graph_capture_shapes=(),
+        packed_dit_cuda_graph_capture_shapes=(),
         reference_workers=factory.reference_workers,
         prompt_cache_capacity=factory.prompt_cache_capacity,
     )
@@ -402,6 +405,7 @@ def test_flow_graph_capture_follows_compile_warmup(
         enable_flow_variable_length=variable_length,
         enable_flow_cuda_graph=enable_graph,
         flow_cuda_graph_capture_shapes=(),
+        packed_dit_cuda_graph_capture_shapes=(),
         reference_workers=1,
         prompt_cache_capacity=1,
     )
@@ -432,6 +436,7 @@ def compiled_vocoder() -> Iterator[MiniCPMOCode2Wav]:
         enable_flow_variable_length=factory.enable_flow_variable_length,
         enable_flow_cuda_graph=False,
         flow_cuda_graph_capture_shapes=(),
+        packed_dit_cuda_graph_capture_shapes=(),
         reference_workers=factory.reference_workers,
         prompt_cache_capacity=factory.prompt_cache_capacity,
     )
@@ -477,6 +482,7 @@ def test_dit_torch_compile_rejects_non_cuda_device() -> None:
             enable_flow_variable_length=True,
             enable_flow_cuda_graph=False,
             flow_cuda_graph_capture_shapes=(),
+            packed_dit_cuda_graph_capture_shapes=(),
             reference_workers=8,
             prompt_cache_capacity=32,
         )
