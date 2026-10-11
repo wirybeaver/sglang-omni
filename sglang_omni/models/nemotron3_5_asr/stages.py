@@ -20,6 +20,7 @@ def create_nemotron3_5_asr_executor(
     num_lookahead_tokens: int = 3,
     max_batch_size: int = 8,
     max_batch_wait_ms: float = 2.0,
+    enable_encoder_state_pool: bool = False,
     session_max_concurrency: int | None = None,
     max_open_sessions: int = 64,
     max_state_bytes: int = 8 * 1024 * 1024 * 1024,
@@ -53,6 +54,7 @@ def create_nemotron3_5_asr_executor(
         runner = Nemotron3_5ASRModelRunner(
             model_path,
             device=resolve_device_spec(device, gpu_id),
+            enable_encoder_state_pool=enable_encoder_state_pool,
             dtype=dtype,
             num_lookahead_tokens=num_lookahead_tokens,
         )

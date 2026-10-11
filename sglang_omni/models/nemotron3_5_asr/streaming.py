@@ -206,17 +206,31 @@ class Nemotron3_5ASRStreamState:
 
     def usage(self, reservation: int) -> ResourceUsage:
         tensors: list[torch.Tensor | None] = []
-        for layer in self.decode.attention_cache.layers:
-            if layer.is_initialized:
-                tensors.extend([layer.keys, layer.values])
-            else:
-                pass
-        tensors.extend(
-            layer.cache for layer in self.decode.padding_cache.layers.values()
-        )
+        if self.decode.encoder_slot is not None:
+            encoder_bytes = self.decode.encoder_slot.nbytes
+            kv_tokens = (
+                0
+                if self.decode.encoder_slot.is_released
+                else self.decode.encoder_slot.seen_frames
+            )
+        else:
+            assert (
+                self.decode.attention_cache is not None
+                and self.decode.padding_cache is not None
+            )
+            encoder_bytes = 0
+            kv_tokens = self.decode.attention_cache.get_seq_length()
+            for layer in self.decode.attention_cache.layers:
+                if layer.is_initialized:
+                    tensors.extend([layer.keys, layer.values])
+                else:
+                    pass
+            tensors.extend(
+                layer.cache for layer in self.decode.padding_cache.layers.values()
+            )
         decoder = self.decode.decoder_cache
         tensors.extend([decoder.cache, decoder.hidden_state, decoder.cell_state])
-        cache_bytes = sum(
+        cache_bytes = encoder_bytes + sum(
             tensor.numel() * tensor.element_size()
             for tensor in tensors
             if tensor is not None
@@ -224,7 +238,7 @@ class Nemotron3_5ASRStreamState:
         history_bytes = (len(self.decode.tokens) + len(self.decode.durations)) * 48
         text_bytes = (len(self.raw_text) + len(self.clean_text)) * 4
         return ResourceUsage(
-            kv_tokens=self.decode.attention_cache.get_seq_length(),
+            kv_tokens=kv_tokens,
             bytes=cache_bytes + history_bytes + text_bytes + len(self.pcm_bytes),
             slots={
                 "pcm_bytes": len(self.pcm_bytes),

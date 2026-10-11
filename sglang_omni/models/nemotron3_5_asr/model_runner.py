@@ -20,7 +20,15 @@ from sglang_omni.models.nemotron3_5_asr.decoder import (
     Nemotron3_5ASRDecodeState,
     decode_streaming_batch,
 )
-from sglang_omni.models.nemotron3_5_asr.encoder import encode_streaming_batch
+from sglang_omni.models.nemotron3_5_asr.encoder import (
+    encode_pooled_streaming_batch,
+    encode_streaming_batch,
+)
+from sglang_omni.models.nemotron3_5_asr.encoder_state_pool import (
+    EncoderPoolLayout,
+    EncoderStateSlot,
+    NemotronEncoderStatePool,
+)
 from sglang_omni.models.nemotron3_5_asr.request_builders import (
     NEMOTRON_ASR_SAMPLE_RATE,
     Nemotron3_5ASRRequest,
@@ -70,6 +78,7 @@ class Nemotron3_5ASRModelRunner:
         model_path: str,
         *,
         device: str,
+        enable_encoder_state_pool: bool,
         dtype: str | torch.dtype = "float32",
         num_lookahead_tokens: int = 3,
     ) -> None:
@@ -100,6 +109,21 @@ class Nemotron3_5ASRModelRunner:
         self.model.eval()
         # note (Li Gang): generate mutates model-owned decoder progress.
         self.model_lock = threading.Lock()
+        self.encoder_pool_layout: EncoderPoolLayout | None = (
+            EncoderPoolLayout.from_model(self.model)
+            if enable_encoder_state_pool
+            else None
+        )
+        self.encoder_state_pool: NemotronEncoderStatePool | None = None
+
+    def configure_encoder_state_pool(self, capacity_slots: int) -> None:
+        if self.encoder_pool_layout is not None:
+            assert self.encoder_state_pool is None
+            self.encoder_state_pool = NemotronEncoderStatePool(
+                self.encoder_pool_layout, capacity_slots
+            )
+        else:
+            pass
 
     @property
     def prompt_dictionary(self) -> dict[str, int]:
@@ -121,6 +145,16 @@ class Nemotron3_5ASRModelRunner:
 
     @property
     def streaming_state_budget_bytes(self) -> int:
+        if self.encoder_pool_layout is not None:
+            config = self.model.config
+            decoder_bytes = (
+                (2 * config.num_decoder_layers + 1)
+                * config.decoder_hidden_size
+                * self.dtype.itemsize
+            )
+            return self.encoder_pool_layout.slot_bytes + decoder_bytes
+        else:
+            pass
         # note (Li Gang): Reserve cache growth before creating a session, including convolution state.
         config = self.model.config.encoder_config
         cache_frames = (
@@ -137,11 +171,24 @@ class Nemotron3_5ASRModelRunner:
 
     def new_streaming_decode_state(self) -> Nemotron3_5ASRDecodeState:
         blank_token_id = int(self.model.config.blank_token_id)
+        decoder_cache = Nemotron3_5AsrRNNTDecoderCache(self.model.config)
+        if self.encoder_pool_layout is not None:
+            assert self.encoder_state_pool is not None
+            return Nemotron3_5ASRDecodeState(
+                tokens=[blank_token_id],
+                durations=[0],
+                attention_cache=None,
+                padding_cache=None,
+                decoder_cache=decoder_cache,
+                encoder_slot=self.encoder_state_pool.acquire(),
+            )
+        else:
+            pass
         return Nemotron3_5ASRDecodeState(
             tokens=[blank_token_id],
             durations=[0],
             attention_cache=DynamicCache(config=self.model.config.encoder_config),
-            decoder_cache=Nemotron3_5AsrRNNTDecoderCache(self.model.config),
+            decoder_cache=decoder_cache,
         )
 
     def prepare_streaming_chunk(
@@ -199,14 +246,34 @@ class Nemotron3_5ASRModelRunner:
             else:
                 pass
             started_at_s = time.perf_counter()
-            encoded_frames = encode_streaming_batch(
-                self.model,
-                [chunk.input_features for chunk in chunks],
-                torch.cat([chunk.prompt_ids.reshape(-1) for chunk in chunks]),
-                attention_caches=[state.attention_cache for state in states],
-                padding_caches=[state.padding_cache for state in states],
-                num_lookahead_tokens=self.processor.default_num_lookahead_tokens,
-            )
+            input_features = [chunk.input_features for chunk in chunks]
+            prompt_ids = torch.cat([chunk.prompt_ids.reshape(-1) for chunk in chunks])
+            if self.encoder_state_pool is not None:
+                encoder_slots: list[EncoderStateSlot] = []
+                for state in states:
+                    assert state.encoder_slot is not None
+                    encoder_slots.append(state.encoder_slot)
+                encoded_frames = encode_pooled_streaming_batch(
+                    self.model,
+                    input_features,
+                    prompt_ids,
+                    encoder_slots=encoder_slots,
+                    num_lookahead_tokens=self.processor.default_num_lookahead_tokens,
+                )
+            else:
+                assert all(
+                    state.attention_cache is not None
+                    and state.padding_cache is not None
+                    for state in states
+                )
+                encoded_frames = encode_streaming_batch(
+                    self.model,
+                    input_features,
+                    prompt_ids,
+                    attention_caches=[state.attention_cache for state in states],
+                    padding_caches=[state.padding_cache for state in states],
+                    num_lookahead_tokens=self.processor.default_num_lookahead_tokens,
+                )
             decode_streaming_batch(self.model, states, encoded_frames, token_limits)
             if self.device.type == "cuda":
                 torch.cuda.synchronize(self.device)
@@ -324,6 +391,11 @@ class Nemotron3_5ASRModelRunner:
         return [ordered_results[index] for index in range(len(requests))]
 
     def close(self) -> None:
+        if self.encoder_state_pool is not None:
+            self.encoder_state_pool.close()
+            self.encoder_state_pool = None
+        else:
+            pass
         del self.model, self.processor
 
 

@@ -32,6 +32,7 @@ Tune the ASR stage with `--asr.factory.*` flags:
 | `num_lookahead_tokens` | `3` | Encoder right context; the checkpoint supports `0`, `3`, `6`, and `13` |
 | `max_batch_size` | `8` | Maximum number of requests in a scheduler batch |
 | `max_batch_wait_ms` | `2.0` | Maximum wait to form a batch, in milliseconds |
+| `enable_encoder_state_pool` | `false` | Keep streaming encoder KV and convolution state in fixed-capacity session slots; encoder execution remains eager |
 | `session_max_concurrency` | `max(4, max_batch_size)` | Concurrent hooks/ordinary requests per ASR replica |
 | `max_open_sessions` | `64` | Open streams per ASR replica |
 | `max_state_bytes` | `8 GiB` | Total reserved session state budget, excluding shared model weights |
@@ -191,6 +192,35 @@ validated and counted toward duration without further inference or buffering.
 Budget errors after stage acceptance terminate the stream; they are not a
 promise that retrying the same seq is safe. Public admission rejection follows
 the shared runtime's sequence/retry contract.
+
+### Persistent encoder state pool
+
+Enable `--asr.factory.enable_encoder_state_pool true` to allocate persistent
+attention and convolution buffers before the model thread starts. Each session
+leases one slot; batches pass slot IDs to tensor gather/write-back operations.
+The encoder retains up to `sliding_window - 1` history frames per slot. Logical
+frame counts and masks handle history filling and the sliding window without
+growing or replacing the pool buffers. First and subsequent windows are grouped
+for their different causal-convolution padding, and output rows are restored to
+request order before RNN-T decoding.
+
+Pool capacity is the smaller of `max_open_sessions` and the number of complete
+session reservations that fit `max_state_bytes`. Each reservation includes the
+full encoder slot, decoder state, and the configured PCM/history/text budgets.
+A budget too small for one slot fails at startup. The pool occupies its full
+capacity even when idle; active-session usage reports each leased slot once,
+while batch temporaries and allocator overhead remain outside the state budget.
+
+EOS releases the slot after the final window has finished. Reaching the decoder
+token limit, cancellation, close, failure, and shutdown also release it. Reused
+slots are cleared before another session receives them. Completed sessions keep
+their transcript and RNN-T state until close, but no longer own encoder storage.
+All pool access and slot recycling use the existing serialized model owner.
+
+The pool is opt-in for comparison with the original dynamic-cache eager path.
+It performs no CUDA Graph capture; tensor slot IDs provide the boundary for a
+separate graph implementation. CPU parity and lifecycle tests do not establish
+GPU performance or real-checkpoint recognition accuracy.
 
 Setting stream=true on /v1/audio/transcriptions streams the response to a
 complete uploaded file. It does not select native PCM input.

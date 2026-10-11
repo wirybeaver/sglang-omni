@@ -8,6 +8,7 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
+from sglang_omni.config.runtime import resolve_stage_factory_args
 from sglang_omni.models.nemotron3_5_asr import request_builders, stages
 from sglang_omni.models.nemotron3_5_asr.config import Nemotron3_5ASRPipelineConfig
 from sglang_omni.models.registry import PIPELINE_CONFIG_REGISTRY
@@ -25,6 +26,13 @@ def test_config_leaves_defaults_to_factory() -> None:
     assert (
         PIPELINE_CONFIG_REGISTRY.get_config("Nemotron3_5AsrForRNNT")
         is Nemotron3_5ASRPipelineConfig
+    )
+    config.stages[0].factory.enable_encoder_state_pool = True
+    assert (
+        resolve_stage_factory_args(config.stages[0], config)[
+            "enable_encoder_state_pool"
+        ]
+        is True
     )
 
 

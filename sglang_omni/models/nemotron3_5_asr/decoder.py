@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import torch
 from transformers.cache_utils import DynamicCache
 
+from sglang_omni.models.nemotron3_5_asr.encoder_state_pool import EncoderStateSlot
 from sglang_omni.vendor.nemotron3_5_asr.generation_nemotron3_5_asr import (
     Nemotron3_5AsrRNNTDecoderCache,
 )
@@ -23,14 +24,21 @@ from sglang_omni.vendor.nemotron3_5_asr.modeling_nemotron_asr_streaming import (
 class Nemotron3_5ASRDecodeState:
     tokens: list[int]
     durations: list[int]
-    attention_cache: DynamicCache
+    attention_cache: DynamicCache | None
     decoder_cache: Nemotron3_5AsrRNNTDecoderCache
-    padding_cache: NemotronAsrStreamingEncoderCausalConvPaddingCache = field(
+    padding_cache: NemotronAsrStreamingEncoderCausalConvPaddingCache | None = field(
         default_factory=NemotronAsrStreamingEncoderCausalConvPaddingCache
     )
+    encoder_slot: EncoderStateSlot | None = None
     symbols_at_frame: int = 0
     encoder_frames: int = 0
     decoder_steps: int = 0
+
+    def release_encoder_state(self) -> None:
+        if self.encoder_slot is not None:
+            self.encoder_slot.release()
+        else:
+            pass
 
 
 def decode_streaming_batch(
