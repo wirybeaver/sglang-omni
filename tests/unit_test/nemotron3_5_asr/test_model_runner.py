@@ -129,6 +129,7 @@ def make_runner() -> tuple[Nemotron3_5ASRModelRunner, FakeProcessor, FakeModel]:
     runner.model_lock = threading.Lock()
     runner.encoder_pool_layout = None
     runner.encoder_state_pool = None
+    runner.encoder_graph_runner = None
     return runner, processor, model
 
 

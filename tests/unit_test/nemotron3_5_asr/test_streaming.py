@@ -88,6 +88,8 @@ class FakeRunner(Nemotron3_5ASRModelRunner):
             else None
         )
         self.encoder_state_pool = None
+        self.enable_encoder_cuda_graph = False
+        self.encoder_graph_runner = None
 
     @property
     def streaming_state_budget_bytes(self) -> int:

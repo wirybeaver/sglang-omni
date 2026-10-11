@@ -181,6 +181,7 @@ def test_local_model_preserves_streaming_results_and_caches_when_batched(
     runner.model_lock = threading.Lock()
     runner.encoder_pool_layout = None
     runner.encoder_state_pool = None
+    runner.encoder_graph_runner = None
 
     def decode_rows(
         rows: list[torch.Tensor], *, skip_special_tokens: bool

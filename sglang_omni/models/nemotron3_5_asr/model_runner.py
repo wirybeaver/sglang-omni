@@ -21,6 +21,7 @@ from sglang_omni.models.nemotron3_5_asr.decoder import (
     decode_streaming_batch,
 )
 from sglang_omni.models.nemotron3_5_asr.encoder import (
+    NemotronStreamingEncoderGraphRunner,
     encode_pooled_streaming_batch,
     encode_streaming_batch,
 )
@@ -79,6 +80,8 @@ class Nemotron3_5ASRModelRunner:
         *,
         device: str,
         enable_encoder_state_pool: bool,
+        enable_encoder_cuda_graph: bool,
+        encoder_graph_max_batch_size: int,
         dtype: str | torch.dtype = "float32",
         num_lookahead_tokens: int = 3,
     ) -> None:
@@ -109,9 +112,14 @@ class Nemotron3_5ASRModelRunner:
         self.model.eval()
         # note (Li Gang): generate mutates model-owned decoder progress.
         self.model_lock = threading.Lock()
+        self.enable_encoder_cuda_graph: bool = (
+            enable_encoder_cuda_graph and self.device.type == "cuda"
+        )
+        self.encoder_graph_max_batch_size: int = encoder_graph_max_batch_size
+        self.encoder_graph_runner: NemotronStreamingEncoderGraphRunner | None = None
         self.encoder_pool_layout: EncoderPoolLayout | None = (
             EncoderPoolLayout.from_model(self.model)
-            if enable_encoder_state_pool
+            if enable_encoder_state_pool or self.enable_encoder_cuda_graph
             else None
         )
         self.encoder_state_pool: NemotronEncoderStatePool | None = None
@@ -122,6 +130,16 @@ class Nemotron3_5ASRModelRunner:
             self.encoder_state_pool = NemotronEncoderStatePool(
                 self.encoder_pool_layout, capacity_slots
             )
+            if self.enable_encoder_cuda_graph:
+                self.encoder_graph_runner = NemotronStreamingEncoderGraphRunner(
+                    self.model,
+                    self.encoder_state_pool,
+                    subsequent_mel_frames=self.processor.num_mel_frames_per_audio_chunk,
+                    num_lookahead_tokens=self.processor.default_num_lookahead_tokens,
+                    max_batch_size=self.encoder_graph_max_batch_size,
+                )
+            else:
+                pass
         else:
             pass
 
@@ -259,6 +277,7 @@ class Nemotron3_5ASRModelRunner:
                     prompt_ids,
                     encoder_slots=encoder_slots,
                     num_lookahead_tokens=self.processor.default_num_lookahead_tokens,
+                    graph_runner=self.encoder_graph_runner,
                 )
             else:
                 assert all(
@@ -391,6 +410,11 @@ class Nemotron3_5ASRModelRunner:
         return [ordered_results[index] for index in range(len(requests))]
 
     def close(self) -> None:
+        if self.encoder_graph_runner is not None:
+            self.encoder_graph_runner.close()
+            self.encoder_graph_runner = None
+        else:
+            pass
         if self.encoder_state_pool is not None:
             self.encoder_state_pool.close()
             self.encoder_state_pool = None

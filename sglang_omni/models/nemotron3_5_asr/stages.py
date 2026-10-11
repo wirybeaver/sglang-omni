@@ -21,6 +21,8 @@ def create_nemotron3_5_asr_executor(
     max_batch_size: int = 8,
     max_batch_wait_ms: float = 2.0,
     enable_encoder_state_pool: bool = False,
+    enable_encoder_cuda_graph: bool = True,
+    encoder_graph_max_batch_size: int | None = None,
     session_max_concurrency: int | None = None,
     max_open_sessions: int = 64,
     max_state_bytes: int = 8 * 1024 * 1024 * 1024,
@@ -28,6 +30,11 @@ def create_nemotron3_5_asr_executor(
     max_history_tokens: int = 16384,
     max_text_bytes: int = 2 * 1024 * 1024,
 ) -> NemotronSessionScheduler:
+    resolved_encoder_graph_max_batch_size = (
+        max_batch_size
+        if encoder_graph_max_batch_size is None
+        else encoder_graph_max_batch_size
+    )
     concurrency = (
         max(4, max_batch_size)
         if session_max_concurrency is None
@@ -36,6 +43,7 @@ def create_nemotron3_5_asr_executor(
     if (
         min(
             max_batch_size,
+            resolved_encoder_graph_max_batch_size,
             concurrency,
             max_open_sessions,
             max_state_bytes,
@@ -55,6 +63,8 @@ def create_nemotron3_5_asr_executor(
             model_path,
             device=resolve_device_spec(device, gpu_id),
             enable_encoder_state_pool=enable_encoder_state_pool,
+            enable_encoder_cuda_graph=enable_encoder_cuda_graph,
+            encoder_graph_max_batch_size=resolved_encoder_graph_max_batch_size,
             dtype=dtype,
             num_lookahead_tokens=num_lookahead_tokens,
         )
