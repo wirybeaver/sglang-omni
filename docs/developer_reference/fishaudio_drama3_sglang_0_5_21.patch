@@ -1,0 +1,243 @@
+--- a/sglang/kernels/ops/attention/fla/chunk.py
++++ b/sglang/kernels/ops/attention/fla/chunk.py
+@@ -45,6 +45,8 @@
+     cu_seqlens: Optional[torch.LongTensor] = None,
+     chunk_indices: torch.LongTensor | None = None,
+     inplace_update: bool = True,
++    track_state: torch.Tensor | None = None,
++    track_chunk_idx: torch.Tensor | None = None,
+ ):
+     g = chunk_local_cumsum(
+         g, chunk_size=CHUNK_SIZE, cu_seqlens=cu_seqlens, chunk_indices=chunk_indices
+@@ -70,6 +72,8 @@
+         cu_seqlens=cu_seqlens,
+         chunk_indices=chunk_indices,
+         inplace_update=inplace_update,
++        track_state=track_state,
++        track_chunk_idx=track_chunk_idx,
+     )
+     o = chunk_fwd_o(
+         q=q,
+@@ -103,6 +107,8 @@
+         cu_seqlens: Optional[torch.LongTensor] = None,
+         use_qk_l2norm_in_kernel: bool = False,
+         inplace_update: bool = True,
++        track_state: torch.Tensor | None = None,
++        track_chunk_idx: torch.Tensor | None = None,
+     ):
+         q_orig = q
+         k_orig = k
+@@ -128,6 +134,8 @@
+             cu_seqlens=cu_seqlens,
+             chunk_indices=chunk_indices,
+             inplace_update=inplace_update,
++            track_state=track_state,
++            track_chunk_idx=track_chunk_idx,
+         )
+         return o.to(q.dtype), h
+ 
+@@ -146,6 +154,8 @@
+     head_first: bool = False,
+     use_qk_l2norm_in_kernel: bool = False,
+     inplace_update: bool = True,
++    track_state: torch.Tensor | None = None,
++    track_chunk_idx: torch.Tensor | None = None,
+ ):
+     r"""
+     Args:
+@@ -263,6 +273,8 @@
+         cu_seqlens,
+         use_qk_l2norm_in_kernel,
+         inplace_update,
++        track_state,
++        track_chunk_idx,
+     )
+     if head_first:
+         o = rearrange(o, "b t h ... -> b h t ...")
+--- a/sglang/srt/layers/attention/hybrid_linear_attn_backend.py
++++ b/sglang/srt/layers/attention/hybrid_linear_attn_backend.py
+@@ -960,8 +960,13 @@
+         all-layers launch fired at the last mamba layer: the mask/src/dst
+         indices are shared across layers and every layer's state is final by
+         then, so the result is identical."""
+-        if forward_batch.mamba_track_mask is None:
++        if (
++            self.req_to_token_pool.mamba_cache_prompt_only
++            or forward_batch.mamba_track_mask is None
++        ):
+             return
++        else:
++            pass
+         if layer_id is not None:
+             pools = self._track_pools()
+             if pools is not None:
+--- a/sglang/srt/layers/attention/linear/gdn_backend.py
++++ b/sglang/srt/layers/attention/linear/gdn_backend.py
+@@ -1099,6 +1099,20 @@
+                 )
+         else:
+             g, beta = fused_gdn_gating(layer.A_log, a, b, layer.dt_bias)
++            tracked_states = None
++            if (
++                forward_metadata.has_mamba_track_mask
++                and forward_metadata.track_ssm_h_src.numel() > 0
++                and self.kernel_dispatcher.extend_kernel.supports_track_state_snapshot
++            ):
++                assert forward_metadata.track_chunk_idx is not None
++                tracked_states = torch.empty(
++                    (len(cache_indices), *ssm_states.shape[1:]),
++                    dtype=torch.float32,
++                    device=ssm_states.device,
++                )
++            else:
++                pass
+             core_attn_out, last_recurrent_state, h = self.kernel_dispatcher.extend(
+                 q=query,
+                 k=key,
+@@ -1116,6 +1130,12 @@
+                     forward_metadata.state_checkpoint_every_n_tokens
+                 ),
+                 output=kwargs.get("linear_attn_output"),
++                track_state=tracked_states,
++                track_chunk_idx=(
++                    forward_metadata.track_chunk_idx
++                    if tracked_states is not None
++                    else None
++                ),
+             )
+ 
+             if is_npu() and last_recurrent_state is not None:
+@@ -1132,7 +1152,11 @@
+ 
+             if forward_metadata.has_mamba_track_mask:
+                 self._track_mamba_state_extend(
+-                    forward_batch, h, ssm_states, forward_metadata
++                    forward_batch,
++                    h,
++                    ssm_states,
++                    forward_metadata,
++                    h_track_buf=tracked_states,
+                 )
+ 
+         return core_attn_out
+--- a/sglang/srt/layers/attention/linear/kernels/gdn_triton.py
++++ b/sglang/srt/layers/attention/linear/kernels/gdn_triton.py
+@@ -42,6 +42,7 @@
+ 
+     supports_packed_decode: bool = not is_cpu() and not is_npu()
+     supports_strided_target_verify_qkv: bool = True
++    supports_track_state_snapshot: bool = not (is_cpu() or is_npu() or is_xpu())
+ 
+     def packed_decode(
+         self,
+@@ -183,6 +184,13 @@
+         recurrent_state = ssm_states
+         recurrent_state_indices_args = {"initial_state_indices": cache_indices}
+         inplace_update_args = {"inplace_update": inplace_update}
++        if self.supports_track_state_snapshot:
++            snapshot_arguments = {
++                "track_state": kwargs.get("track_state"),
++                "track_chunk_idx": kwargs.get("track_chunk_idx"),
++            }
++        else:
++            snapshot_arguments = {}
+         if is_cpu():
+             if not inplace_update:
+                 raise NotImplementedError(
+@@ -212,6 +220,7 @@
+             use_qk_l2norm_in_kernel=True,
+             **recurrent_state_indices_args,
+             **inplace_update_args,
++            **snapshot_arguments,
+         )
+ 
+     def target_verify(
+--- a/sglang/srt/layers/attention/triton_backend.py
++++ b/sglang/srt/layers/attention/triton_backend.py
+@@ -148,6 +148,8 @@
+     # kv_indptr/qo_indptr are preallocated at (req pool + 1); an extend batch
+     # can never carry more seqs than the pool.
+     extend_dummy_seqs_capped_by_req_pool: bool = True
++    # note (wirybeaver): unify prefill without changing decode splitting.
++    use_unified_prefill: bool = False
+ 
+     def __init__(
+         self,
+@@ -1702,7 +1704,7 @@
+             )
+ 
+         # Deterministic mode: use unified 1-stage kernel
+-        if self.enable_deterministic:
++        if self.enable_deterministic or self.use_unified_prefill:
+             return self._forward_extend_unified(
+                 q,
+                 o,
+--- a/sglang/srt/managers/schedule_batch.py
++++ b/sglang/srt/managers/schedule_batch.py
+@@ -3618,7 +3618,18 @@
+                 self.req_pool_indices_cpu,
+             )
+ 
+-        if get_exec().mamba.enable_mamba_extra_buffer:
++        if (
++            get_exec().mamba.enable_mamba_extra_buffer
++            and self.req_to_token_pool.mamba_cache_prompt_only
++        ):
++            self.mamba_track_indices = None
++            self.mamba_track_buffer_indices = None
++            self.mamba_track_mask = None
++            self.mamba_track_seqlens = None
++            self.mamba_track_mask_cpu = None
++            self.mamba_track_mask_next_cpu = None
++            self.mamba_decode_batch_idx_cpu = None
++        elif get_exec().mamba.enable_mamba_extra_buffer:
+             mamba_track_interval = mamba_track_grid(self.tree_cache.page_size)
+ 
+             if len(self.reqs) == 0:
+@@ -3649,6 +3660,8 @@
+             self.mamba_track_mask = track_mask_cpu.pin_memory().to(
+                 device=self.device, non_blocking=True
+             )
++        else:
++            pass
+ 
+     def filter_batch(
+         self,
+--- a/sglang/srt/managers/scheduler_components/batch_result_processor.py
++++ b/sglang/srt/managers/scheduler_components/batch_result_processor.py
+@@ -1395,6 +1395,13 @@
+         """
+         if req.kv.mamba_ping_pong_track_buffer is None:
+             return
++        elif (
++            batch.req_to_token_pool.mamba_cache_prompt_only
++            and batch.forward_mode.is_decode()
++        ):
++            return
++        else:
++            pass
+ 
+         lazy = get_exec().mamba.enable_mamba_extra_buffer_lazy
+         if known_boundary:
+--- a/sglang/srt/mem_cache/memory_pool.py
++++ b/sglang/srt/mem_cache/memory_pool.py
+@@ -273,6 +273,9 @@
+ 
+ class ReqToTokenPool:
+     """A memory pool that maps a request to its token locations."""
++
++    # note (wirybeaver): fixed before graph capture; the caller suppresses tail inserts.
++    mamba_cache_prompt_only: bool = False
+ 
+     enable_mamba_extra_buffer_lazy: bool = False
+     # Extra pre-allocation headroom (reserved for in-transfer decode requests).
+--- a/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py
++++ b/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py
+@@ -396,6 +396,7 @@
+ 
+         enable_mamba_track = (
+             get_exec().mamba.enable_mamba_extra_buffer
++            and not self.model_runner.req_to_token_pool.mamba_cache_prompt_only
+             and self.model_runner.spec_algorithm.is_none()
+         )
+ 

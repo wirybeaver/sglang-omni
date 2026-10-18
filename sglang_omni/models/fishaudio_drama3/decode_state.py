@@ -59,30 +59,32 @@ def ras_window(frame_rows: list[list[int]]) -> list[int]:
 
 
 def extend_frame_rows(request_data: Drama3RequestData) -> list[list[int]]:
-    """The rows of a prefill, which must cover the request's whole frame history."""
+    """Uncached frame rows through the end of the request's history."""
     sglang_request = request_data.req
     assert sglang_request is not None
     sequence_ids = list(sglang_request.full_untruncated_fill_ids)
     extend_range = sglang_request.extend_range
     if (
         extend_range is None
-        or extend_range.start != 0
+        or (extend_range.start != 0 and not request_data.prefix_cache_enabled)
         or extend_range.end != len(sequence_ids)
     ):
         raise RuntimeError(
-            f"{sglang_request.rid}: a Drama 3 prefill must cover the whole sequence of "
-            f"{len(sequence_ids)} rows in one extend; got {extend_range}"
+            f"{sglang_request.rid}: expected the complete uncached suffix of "
+            f"{len(sequence_ids)} sequence rows; got {extend_range}"
         )
     elif len(sequence_ids) < MINIMUM_PROMPT_ROWS:
         raise RuntimeError(
             f"{sglang_request.rid}: an extend needs at least {MINIMUM_PROMPT_ROWS} rows"
         )
-    elif [frame_row[0] for frame_row in request_data.frame_rows] != sequence_ids:
+    elif [frame_row[0] for frame_row in request_data.frame_rows] != (
+        request_data.input_ids.tolist() + list(sglang_request.output_ids)
+    ):
         raise RuntimeError(
             f"{sglang_request.rid}: the frame history is not the sequence"
         )
     else:
-        return request_data.frame_rows
+        return request_data.frame_rows[extend_range.start : extend_range.end]
 
 
 def request_data_of(request: SchedulerRequest) -> Drama3RequestData:
