@@ -1,0 +1,191 @@
+{
+  "purpose": "Historical tested source snapshot; not the later rebased PR head",
+  "experiment_stage": 1,
+  "frozen_run_id": "gdn-standalone-abba-state-20261026",
+  "application_role": "Base application, prefix cache OFF",
+  "application_foundation_commit": "ca6fb6b6fefb042decc27826b50dbca532f3d527",
+  "frozen_archive_sha256": "4a89764e1273938b1ea832fa32a72bf4bf14cf350285e898e8b5c0eab4e4c7c3",
+  "frozen_file_inventory_sha256": "95e54453fa626f3de7d1906007cb6f593911854edbd4de4a705f0f745bc17056",
+  "verified_frozen_files": 3355,
+  "verification": "Every frozen file matches when the original benchmark-only client overlay below is applied. Additional snapshot metadata files are excluded; Git symlinks retain identical resolved contents.",
+  "client_overlay": {
+    "patched_tts_sha256": "5a2a4a40f07b497cb4dca7e5956d929836b74fe60114a411217ec84948f52fd3",
+    "base_tts_sha256": "f786a4d5908de19dd3fe478d709bd8614ede231f3bb280d31508a8a3fc3ef2e1",
+    "client_overlay_patch_sha256": "c6901d4e89fb2fc1a9a5c96e2d8b74b0632de07b3ea268d2ef602845a5ac8011",
+    "scope": "same client-only PCM buffering and post-timing WAV persistence; no payload/model/sampler change",
+    "patch": "--- a/benchmarks/tasks/tts.py\n+++ b/benchmarks/tasks/tts.py\n@@ -1297,10 +1297,9 @@\n     result.rtf = elapsed / result.audio_duration_s\n     result.is_success = True\n     if save_audio_dir:\n-        audio_path = os.path.join(save_audio_dir, f\"{result.request_id}.wav\")\n-        with open(audio_path, \"wb\") as fh:\n-            fh.write(_build_streaming_wav_bytes(pcm_chunks, pcm_format))\n-        result.wav_path = audio_path\n+        DEFERRED_STREAMING_AUDIO.append((result, pcm_chunks, pcm_format, save_audio_dir))\n+    else:\n+        pass\n \n \n async def _handle_non_streaming_response(\n@@ -1394,6 +1393,19 @@\n     return wav_buffer.getvalue()\n \n \n+DEFERRED_STREAMING_AUDIO: list[tuple[RequestResult, list[bytes], tuple[int, int, int], str]] = []\n+\n+\n+def flush_deferred_streaming_audio() -> None:\n+    \"\"\"Persist retained media after the benchmark timing window closes.\"\"\"\n+    for result, pcm_chunks, pcm_format, audio_directory in DEFERRED_STREAMING_AUDIO:\n+        audio_path = os.path.join(audio_directory, f\"{result.request_id}.wav\")\n+        with open(audio_path, \"wb\") as output:\n+            output.write(_build_streaming_wav_bytes(pcm_chunks, pcm_format))\n+        result.wav_path = audio_path\n+    DEFERRED_STREAMING_AUDIO.clear()\n+\n+\n def make_tts_send_fn(\n     model_name: str,\n     api_url: str,\n",
+    "application": "Apply patch at checkout root; the timed harness calls flush_deferred_streaming_audio after runner and client wall timing. Stock benchmark CLI does not perform that deferred flush."
+  },
+  "runtime_commits": {
+    "A": "9f6678aa3d6b8fd4e898fe0fc0b11b932126cf61",
+    "B": "31913fac8576cd387810fe727f8d69386fab5916"
+  },
+  "model": {
+    "repo": "fishaudio/drama-3",
+    "revision": "e0a9218aa48888270f06ef1ed9ea67622c0e17d2",
+    "quantization": "checkpoint bsgemm-moe; no int4 substitution"
+  },
+  "codec": {
+    "repo": "fishaudio/s2-pro",
+    "revision": "1de9996b6be38b745688de084d87a5633f714e4e",
+    "file": "codec.pth",
+    "encode_dtype": "bfloat16",
+    "encode_device": "cuda:0",
+    "encode_once": true,
+    "max_reference_audio_seconds": 60
+  },
+  "request_parameters": {
+    "stream": true,
+    "temperature": 1.0,
+    "top_p": 0.9,
+    "top_k": "omitted; unchanged semantic default",
+    "max_new_tokens": 500,
+    "server_random_seed": 1234,
+    "request_seed": {
+      "A": 1234,
+      "B": 1234
+    }
+  },
+  "server": {
+    "placement": "all pipeline stages on GPU 0; one live TTS server; no MPS or replicas",
+    "ports": {
+      "tts": 8000,
+      "asr": 8001
+    },
+    "max_running_requests": 16,
+    "cuda_graph_max_bs": 16,
+    "first_frame_cuda_graph_max_requests": 16,
+    "prefill_cuda_graph_max_tokens": 2048,
+    "tts_gpu_memory_fraction": 0.85,
+    "vocoder_gpu_memory_fraction": 0.1,
+    "preprocessing_reserve_bytes": "6GiB",
+    "max_mamba_cache_size": 512,
+    "enable_async_decode": false,
+    "enable_torch_compile": false,
+    "environment": {
+      "SGLANG_OMNI_TORCH_COMPILE_DEFAULT": "0",
+      "SGLANG_OMNI_AUTO_CLONE": "0",
+      "CUDA_VISIBLE_DEVICES": "0",
+      "OMP_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "TOKENIZERS_PARALLELISM": "false"
+    },
+    "arm_A": {
+      "disable_radix_cache": true,
+      "mamba_radix_cache_strategy": null,
+      "prefix_cache_prompt_only": false
+    },
+    "arm_B": {
+      "disable_radix_cache": true,
+      "mamba_radix_cache_strategy": null,
+      "prefix_cache_prompt_only": false
+    },
+    "cpu_affinity": "first12 sorted effective CPU IDs for server,next4 for client;require>=16;fixed policy for every visit",
+    "lifecycle": "Fresh single server for every A-B-B-A-conditional-A-B visit; no A/A because two full Drama servers do not fit",
+    "compiler_caches": "Fresh run-specific per-arm compiler-cache paths. Shared between visits of each arm; startup and shape warmups every fresh server. No hidden reset.",
+    "prefill_decode_interval": 4,
+    "gdn_backend": {
+      "decode": "default; require resolved TritonGDNKernel log",
+      "prefill": "explicit triton fixed across both stages/all arms; target eligible standalone-PR path",
+      "launch_flag": "--tts_engine.engine.linear_attn_prefill_backend triton",
+      "runtime_gate": "Require matching resolved dispatcher decode=TritonGDNKernel, extend=TritonGDNKernel; reject FlashInfer selection"
+    },
+    "prefill_decode_interval_min_bs": 0
+  },
+  "workloads": [
+    {
+      "concurrency": 16,
+      "canary_samples": 1,
+      "canary_offset": 384,
+      "substantial_warmup_samples": 128,
+      "substantial_warmup_offset": 256,
+      "prompt_priming_samples": 256,
+      "shape_warmup_samples": 256,
+      "timed_samples": 256,
+      "sample_offset": 0
+    }
+  ],
+  "image_base": "hongccc/sglang-omni@sha256:06ed306707bcf3d9e9beb5ba7ce66f09a666cac11c23455ece50c34199c0e985",
+  "installed_versions": {
+    "torch": "2.14.1+cu130",
+    "torchvision": "0.29.1+cu130",
+    "torchaudio": "2.11.0+cu130",
+    "torchcodec": "0.17.0+cu130",
+    "sglang": "0.5.22",
+    "transformers": "5.19.0",
+    "tokenizers": "0.23.2",
+    "flashinfer-python": "0.7.2",
+    "triton": "3.8.0",
+    "descript-audio-codec": "1.0.0",
+    "descript-audiotools": "0.7.2",
+    "jiwer": "4.0.0",
+    "s3prl": "0.4.18",
+    "huggingface-hub": "1.33.0",
+    "pydantic": "2.14.1",
+    "aiohttp": "3.14.5",
+    "apache-tvm-ffi": "0.1.11",
+    "blobfile": "3.0.0",
+    "compressed-tensors": "0.18.0",
+    "deepseek-recipe": "0.2.0",
+    "humming-kernels": "0.1.12",
+    "numba": "0.65.1",
+    "nvidia-cutlass-dsl": "4.8.0",
+    "nvidia-mathdx": "25.6.0",
+    "openai": "2.8.0",
+    "openai-harmony": "0.0.4",
+    "outlines": "0.1.11",
+    "quack-kernels": "0.6.5",
+    "sentencepiece": "0.2.1",
+    "sgl-deep-ep": "0.1.2.post1",
+    "sgl-deep-gemm": "0.2.3.post2",
+    "sgl-flash-mla": "1.0.0",
+    "sglang-kernel": "0.4.10",
+    "soundfile": "0.13.1",
+    "tilelang": "0.1.12",
+    "timm": "1.0.16",
+    "tml-renderers": "0.1.0",
+    "xgrammar": "0.2.7",
+    "flashinfer-jit-cache": "0.7.2+cu130",
+    "flashinfer-cubin": "0.7.2"
+  },
+  "source_import_policy": "TTS PYTHONPATH=<Omni checkout>:<SGLang checkout>/python; installed sglang distribution version is not the TTS source revision. Scorers used original ca6 source with stock runtime.",
+  "timed_visits": [
+    {
+      "visit": 1,
+      "arm": "A",
+      "requests_per_second": 9.156747574758114,
+      "mean_TTFA_ms": 265.326171875
+    },
+    {
+      "visit": 2,
+      "arm": "B",
+      "requests_per_second": 10.321068215801137,
+      "mean_TTFA_ms": 224.056640625
+    },
+    {
+      "visit": 3,
+      "arm": "B",
+      "requests_per_second": 10.301237638832074,
+      "mean_TTFA_ms": 222.281640625
+    },
+    {
+      "visit": 4,
+      "arm": "A",
+      "requests_per_second": 9.261905982891331,
+      "mean_TTFA_ms": 258.3859375
+    }
+  ],
+  "quality": {
+    "B": {
+      "wer": 0.013838310269482883,
+      "similarity": 63.88234497606754,
+      "max_token_hits": 0
+    },
+    "A": {
+      "wer": 0.016751638747268753,
+      "similarity": 63.73844622075558,
+      "max_token_hits": 0
+    }
+  },
+  "launch_script": "#!/usr/bin/env bash\nset -euo pipefail\n: \"${ARM:?}\" \"${SOURCE_ROOT:?}\" \"${MODEL_PATH:?}\" \"${CODEC_PATH:?}\" \"${SERVER_CPUSET:?}\" \"${DRAMA_BENCH_OWNER:?}\" \"${RUN_ROOT:?}\"\n: \"${PYTHONPATH:?}\"\n[[ \"$PYTHONPATH\" == \"$SOURCE_ROOT:$RUN_ROOT/runtime/$ARM\" ]]\nexport SGLANG_OMNI_TORCH_COMPILE_DEFAULT=0\nexport SGLANG_OMNI_AUTO_CLONE=0\nexport TOKENIZERS_PARALLELISM=false\nexport OMP_NUM_THREADS=1\nexport MKL_NUM_THREADS=1\nexport CUDA_VISIBLE_DEVICES=0\nexport TORCHINDUCTOR_CACHE_DIR=\"$RUN_ROOT/compiler-cache/$ARM/inductor\"\nexport TRITON_CACHE_DIR=\"$RUN_ROOT/compiler-cache/$ARM/triton\"\nexport SGLANG_CACHE_DIR=\"$RUN_ROOT/compiler-cache/$ARM/sglang\"\nexport SGLANG_JIT_CACHE_DIR=\"$RUN_ROOT/compiler-cache/$ARM/sglang/jit\"\ncache_enabled=$(python -c 'import json,os; print(int(not json.load(open(os.environ[\"RUN_ROOT\"]+\"/manifest.json\"))[\"server\"][\"arm_\"+os.environ[\"ARM\"]][\"disable_radix_cache\"]))')\nif [[ \"$cache_enabled\" == 1 ]]; then\n  cache_arguments=(--tts_engine.engine.disable_radix_cache false --tts_engine.engine.mamba_radix_cache_strategy extra_buffer --tts_engine.factory.prefix_cache_prompt_only true)\nelse\n  cache_arguments=(--tts_engine.engine.disable_radix_cache true)\nfi\ncd \"$SOURCE_ROOT\"\nexec taskset --cpu-list \"$SERVER_CPUSET\" python -m sglang_omni.cli serve \\\n  --model-path \"$MODEL_PATH\" --model-name fishaudio/drama-3 --host 127.0.0.1 --port 8000 \\\n  --tts_engine.gpu 0 --vocoder.gpu 0 --preprocessing.gpu 0 \\\n  --tts_engine.gpu_memory_fraction 0.85 --vocoder.gpu_memory_fraction 0.10 \\\n  --preprocessing.total_reserve_bytes 6GiB \\\n  --tts_engine.factory.max_running_requests 16 \\\n  --tts_engine.engine.cuda_graph_max_bs 16 --tts_engine.engine.random_seed 1234 \\\n  --tts_engine.engine.max_mamba_cache_size 512 \\\n  --tts_engine.engine.linear_attn_prefill_backend triton \\\n  --tts_engine.engine.enable_metrics true \\\n  --tts_engine.engine.enable_torch_compile false \\\n  --vocoder.factory.codec_path \"$CODEC_PATH\" \\\n  \"${cache_arguments[@]}\"\n"
+}
