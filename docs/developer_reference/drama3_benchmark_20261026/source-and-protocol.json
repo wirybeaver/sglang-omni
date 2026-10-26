@@ -1,12 +1,12 @@
 {
   "purpose": "Historical tested source snapshot; not the later rebased PR head",
-  "experiment_stage": 1,
-  "frozen_run_id": "gdn-standalone-abba-state-20261026",
-  "application_role": "Base application, prefix cache OFF",
-  "application_foundation_commit": "ca6fb6b6fefb042decc27826b50dbca532f3d527",
-  "frozen_archive_sha256": "4a89764e1273938b1ea832fa32a72bf4bf14cf350285e898e8b5c0eab4e4c7c3",
-  "frozen_file_inventory_sha256": "95e54453fa626f3de7d1906007cb6f593911854edbd4de4a705f0f745bc17056",
-  "verified_frozen_files": 3355,
+  "experiment_stage": 2,
+  "frozen_run_id": "gdn-prefix-increment-abba-fixture-20261026",
+  "application_role": "GDN application plus prefix-cache feature, cache ON",
+  "application_foundation_commit": "e2b619339228d8aefc5d20b37219466d47a12718",
+  "frozen_archive_sha256": "205875d28611455c50e88d780a6bb21ee64fc944911f26aac3e6df78c5a117fd",
+  "frozen_file_inventory_sha256": "aa099c65fea382dd4f7b58f4fb93e842dee631d5b9d83464cf0cdd77da285294",
+  "verified_frozen_files": 3358,
   "verification": "Every frozen file matches when the original benchmark-only client overlay below is applied. Additional snapshot metadata files are excluded; Git symlinks retain identical resolved contents.",
   "client_overlay": {
     "patched_tts_sha256": "5a2a4a40f07b497cb4dca7e5956d929836b74fe60114a411217ec84948f52fd3",
@@ -17,8 +17,8 @@
     "application": "Apply patch at checkout root; the timed harness calls flush_deferred_streaming_audio after runner and client wall timing. Stock benchmark CLI does not perform that deferred flush."
   },
   "runtime_commits": {
-    "A": "9f6678aa3d6b8fd4e898fe0fc0b11b932126cf61",
-    "B": "31913fac8576cd387810fe727f8d69386fab5916"
+    "A": "31913fac8576cd387810fe727f8d69386fab5916",
+    "B": "dae7917ffd530a8d4d931e1b972e70c1b0f5db22"
   },
   "model": {
     "repo": "fishaudio/drama-3",
@@ -76,9 +76,9 @@
       "prefix_cache_prompt_only": false
     },
     "arm_B": {
-      "disable_radix_cache": true,
-      "mamba_radix_cache_strategy": null,
-      "prefix_cache_prompt_only": false
+      "disable_radix_cache": false,
+      "mamba_radix_cache_strategy": "extra_buffer",
+      "prefix_cache_prompt_only": true
     },
     "cpu_affinity": "first12 sorted effective CPU IDs for server,next4 for client;require>=16;fixed policy for every visit",
     "lifecycle": "Fresh single server for every A-B-B-A-conditional-A-B visit; no A/A because two full Drama servers do not fit",
@@ -153,37 +153,49 @@
     {
       "visit": 1,
       "arm": "A",
-      "requests_per_second": 9.156747574758114,
-      "mean_TTFA_ms": 265.326171875
+      "requests_per_second": 10.44543683050703,
+      "mean_TTFA_ms": 225.06562499999998
     },
     {
       "visit": 2,
       "arm": "B",
-      "requests_per_second": 10.321068215801137,
-      "mean_TTFA_ms": 224.056640625
+      "requests_per_second": 11.031367033163828,
+      "mean_TTFA_ms": 206.2765625
     },
     {
       "visit": 3,
       "arm": "B",
-      "requests_per_second": 10.301237638832074,
-      "mean_TTFA_ms": 222.281640625
+      "requests_per_second": 10.80670023046525,
+      "mean_TTFA_ms": 205.87578125
     },
     {
       "visit": 4,
       "arm": "A",
-      "requests_per_second": 9.261905982891331,
-      "mean_TTFA_ms": 258.3859375
+      "requests_per_second": 10.557015857683705,
+      "mean_TTFA_ms": 218.2953125
+    },
+    {
+      "visit": 5,
+      "arm": "A",
+      "requests_per_second": 10.446169092253495,
+      "mean_TTFA_ms": 219.54062499999998
+    },
+    {
+      "visit": 6,
+      "arm": "B",
+      "requests_per_second": 10.957250063440563,
+      "mean_TTFA_ms": 205.516015625
     }
   ],
   "quality": {
     "B": {
-      "wer": 0.013838310269482883,
-      "similarity": 63.88234497606754,
+      "wer": 0.011653313911143482,
+      "similarity": 63.226375952363014,
       "max_token_hits": 0
     },
     "A": {
-      "wer": 0.016751638747268753,
-      "similarity": 63.73844622075558,
+      "wer": 0.015659140568099052,
+      "similarity": 63.487995117902756,
       "max_token_hits": 0
     }
   },
