@@ -33,8 +33,8 @@
     <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=4418a689" />
     <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
-    <link rel="stylesheet" type="text/css" href="../_static/css/custom_log.css?v=a64801f4" />
-    <link rel="stylesheet" type="text/css" href="../_static/css/custom_log.css?v=a64801f4" />
+    <link rel="stylesheet" type="text/css" href="../_static/css/custom_log.css?v=3b484c19" />
+    <link rel="stylesheet" type="text/css" href="../_static/css/custom_log.css?v=3b484c19" />
   
   <!-- So that users can add custom icons -->
   <script defer src="../_static/scripts/fontawesome.js?digest=90905a2f556bf617f1a9"></script>
@@ -51,18 +51,18 @@
     <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'mlx/index';</script>
     <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
-    <script src="../_static/js/sidebar_company_toggle.js?v=7622d557"></script>
+    <script src="../_static/js/sidebar_company_toggle.js?v=4014cbb0"></script>
     <script src="../_static/js/qwen3_omni_server_generator.js?v=d7738e8a"></script>
     <script src="../_static/js/ming_omni_server_generator.js?v=7979a72f"></script>
     <link rel="icon" href="../_static/logo.ico"/>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="Installation — NPU" href="../get_started/installation_npu.html" />
+    <link rel="next" title="Qwen3-ASR long-recording measurements" href="long_audio.html" />
     <link rel="prev" title="Installation — Apple Silicon" href="../get_started/installation_apple_silicon.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="0.2.0" />
-    <meta name="docbuild:last-update" content="Nov 05, 2026"/>
+    <meta name="docbuild:last-update" content="Nov 07, 2026"/>
   
     
     <script src="../_static/searchtools.js"></script>
@@ -216,7 +216,10 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Other Platforms</span></p>
 <ul class="current nav bd-sidenav">
 <li class="toctree-l1 current active has-children"><a class="reference internal" href="../get_started/installation_apple_silicon.html">Apple Silicon</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
-<li class="toctree-l2 current active"><a class="current reference internal" href="#">Native MLX / Voxt</a></li>
+<li class="toctree-l2 current active has-children"><a class="current reference internal" href="#">Native MLX</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="long_audio.html">Qwen3-ASR long-recording measurements</a></li>
+</ul>
+</details></li>
 </ul>
 </details></li>
 <li class="toctree-l1"><a class="reference internal" href="../get_started/installation_npu.html">Ascend NPU</a></li>
@@ -587,6 +590,8 @@
                   
   <section class="tex2jax_ignore mathjax_ignore" id="mlx-path">
 <h1>MLX Path<a class="headerlink" href="#mlx-path" title="Link to this heading">#</a></h1>
+<div class="toctree-wrapper compound">
+</div>
 <p>Rules for Apple Silicon work. They write down what the native runtime PRs under
 <a class="reference external" href="https://github.com/sgl-project/sglang-omni/issues/2537">#2537</a> already do.</p>
 <section id="layout">
@@ -599,16 +604,16 @@
 </thead>
 <tbody>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">sglang_omni_mlx/native/</span></code></p></td>
-<td><p>C++ runtime on MLX: one server binary per model, a parity CLI per model in <code class="docutils literal notranslate"><span class="pre">tools/</span></code>. Each model’s code is in <code class="docutils literal notranslate"><span class="pre">src/&lt;model&gt;/</span></code>; code shared across models (<code class="docutils literal notranslate"><span class="pre">audio</span></code>, <code class="docutils literal notranslate"><span class="pre">form</span></code>, <code class="docutils literal notranslate"><span class="pre">layers</span></code>, <code class="docutils literal notranslate"><span class="pre">npz</span></code>, <code class="docutils literal notranslate"><span class="pre">tokenizer</span></code>, built as the <code class="docutils literal notranslate"><span class="pre">common</span></code> library, plus <code class="docutils literal notranslate"><span class="pre">swift_port</span></code> and <code class="docutils literal notranslate"><span class="pre">http</span></code>) is in <code class="docutils literal notranslate"><span class="pre">src/common/</span></code>. The shared ASR server code (<code class="docutils literal notranslate"><span class="pre">asr_service</span></code>, <code class="docutils literal notranslate"><span class="pre">worker</span></code>, <code class="docutils literal notranslate"><span class="pre">realtime</span></code>) is still in <code class="docutils literal notranslate"><span class="pre">src/qwen3_asr/</span></code>, and so is the <code class="docutils literal notranslate"><span class="pre">/v1/audio/speech</span></code> API that <code class="docutils literal notranslate"><span class="pre">voxtral_tts_server</span></code> and <code class="docutils literal notranslate"><span class="pre">fishaudio_drama3_server</span></code> share (<code class="docutils literal notranslate"><span class="pre">speech_service</span></code>), built on <code class="docutils literal notranslate"><span class="pre">asr_service</span></code>.</p></td>
+<td><p>C++ runtime on MLX: one server binary per model, a parity CLI per model in <code class="docutils literal notranslate"><span class="pre">tools/</span></code>. Each model’s code is in <code class="docutils literal notranslate"><span class="pre">src/&lt;model&gt;/</span></code>; code shared across models (<code class="docutils literal notranslate"><span class="pre">audio</span></code>, <code class="docutils literal notranslate"><span class="pre">form</span></code>, <code class="docutils literal notranslate"><span class="pre">layers</span></code>, <code class="docutils literal notranslate"><span class="pre">npz</span></code>, <code class="docutils literal notranslate"><span class="pre">tokenizer</span></code>, built as the <code class="docutils literal notranslate"><span class="pre">common</span></code> library, plus <code class="docutils literal notranslate"><span class="pre">swift_port</span></code> and <code class="docutils literal notranslate"><span class="pre">http</span></code>) is in <code class="docutils literal notranslate"><span class="pre">src/common/</span></code>. The shared ASR server code (<code class="docutils literal notranslate"><span class="pre">asr_service</span></code>, <code class="docutils literal notranslate"><span class="pre">worker</span></code>, <code class="docutils literal notranslate"><span class="pre">realtime</span></code>) is still in <code class="docutils literal notranslate"><span class="pre">src/qwen3_asr/</span></code>, and so is the <code class="docutils literal notranslate"><span class="pre">/v1/audio/speech</span></code> API that <code class="docutils literal notranslate"><span class="pre">voxtral_tts_server</span></code> and <code class="docutils literal notranslate"><span class="pre">fishaudio_drama3_server</span></code> share (<code class="docutils literal notranslate"><span class="pre">speech_service</span></code>), built on <code class="docutils literal notranslate"><span class="pre">asr_service</span></code>. <code class="docutils literal notranslate"><span class="pre">ming3_audio_server</span></code> serves <code class="docutils literal notranslate"><span class="pre">/v1/chat/completions</span></code> from its own service in <code class="docutils literal notranslate"><span class="pre">src/ming3_audio/</span></code>.</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">sglang_omni_mlx/native/ci/</span></code></p></td>
-<td><p>Model pins, the 392-clip corpus, golden outputs, server API tests.</p></td>
+<td><p>Model pins, the 392-clip corpus, golden outputs, server API tests and the <a class="reference internal" href="long_audio.html"><span class="std std-doc">long-recording benchmark</span></a>.</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">sglang_omni_mlx/&lt;model&gt;/</span></code></p></td>
 <td><p>Python MLX servers, e.g. the Qwen3-ASR reference server.</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">Voxt/</span></code></p></td>
-<td><p>The macOS app that runs the native servers. See <a class="reference external" href="https://github.com/sgl-project/sglang-omni/blob/main/Voxt/backend/README.md"><code class="docutils literal notranslate"><span class="pre">Voxt/backend/README.md</span></code></a>.</p></td>
+<td><p>Voxt, the macOS app that runs the native servers. See <a class="reference external" href="https://github.com/sgl-project/sglang-omni/blob/main/Voxt/README.md"><code class="docutils literal notranslate"><span class="pre">Voxt/README.md</span></code></a>.</p></td>
 </tr>
 </tbody>
 </table>
@@ -623,7 +628,7 @@
 <li><p>No shared backend interface, base class or registry across the two paths.
 Share code freely inside the MLX path, not across paths.</p></li>
 <li><p>The paths meet only at the OpenAI-style HTTP API (<code class="docutils literal notranslate"><span class="pre">/v1/audio/transcriptions</span></code>,
-<code class="docutils literal notranslate"><span class="pre">/v1/audio/speech</span></code>, <code class="docutils literal notranslate"><span class="pre">/v1/realtime</span></code>, <code class="docutils literal notranslate"><span class="pre">/health</span></code>).</p></li>
+<code class="docutils literal notranslate"><span class="pre">/v1/audio/speech</span></code>, <code class="docutils literal notranslate"><span class="pre">/v1/chat/completions</span></code>, <code class="docutils literal notranslate"><span class="pre">/v1/realtime</span></code>, <code class="docutils literal notranslate"><span class="pre">/health</span></code>).</p></li>
 </ul>
 <p>Why:</p>
 <ul class="simple">
@@ -632,7 +637,7 @@ PyTorch; the MLX path is one process per model on unified memory, shipped as
 C++ binaries. An interface over both hides what makes each fast.</p></li>
 <li><p><strong>Dependencies differ.</strong> SGLang’s wheel pulls CUDA. Keeping MLX out lets Voxt
 run without CUDA, PyTorch or Python.</p></li>
-<li><p><strong>CI differs.</strong> Mac CI only runs on <code class="docutils literal notranslate"><span class="pre">Voxt/**</span></code> and <code class="docutils literal notranslate"><span class="pre">sglang_omni_mlx/**</span></code>, and
+<li><p><strong>CI differs.</strong> Mac CI only runs on <code class="docutils literal notranslate"><span class="pre">sglang_omni_mlx/**</span></code> and the app’s Swift packages, and
 GPU CI never runs on a Mac. A shared layer would break one side without CI
 noticing.</p></li>
 </ul>
@@ -661,10 +666,15 @@ agree on it with a maintainer first.</p>
 <td><p><code class="docutils literal notranslate"><span class="pre">wilsonzheng0327/Qwen3-ASR-1.7B-dflash</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">ci/golden/qwen3-asr-1.7b-8bit-dflash.json</span></code></p></td>
 </tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">OpenMOSS-Team/MOSS-Transcribe-Diarize</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">wilsonzheng0327/MOSS-Transcribe-Diarize-dflash</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ci/model_golden/moss-transcribe-diarize-dflash.json</span></code></p></td>
+</tr>
 </tbody>
 </table>
 </div>
-<p>Both drafts are pinned in <code class="docutils literal notranslate"><span class="pre">ci/models.json</span></code>. A draft for another target is one pin, one golden whose request names it under <code class="docutils literal notranslate"><span class="pre">draft_model_path</span></code>, and a row in Voxt’s <code class="docutils literal notranslate"><span class="pre">OmniASRBackend.draftModelReposByRepo</span></code>. Verifying a block moves the target’s low-precision logits slightly, so a few percent of clips differ from plain decoding in punctuation or a near-tie word; the goldens hold each chip’s draft outputs like any other.</p>
+<p>The Qwen3-ASR drafts are pinned in <code class="docutils literal notranslate"><span class="pre">ci/models.json</span></code>; the MOSS-TD draft is pinned in <code class="docutils literal notranslate"><span class="pre">ci/model_pins.json</span></code>. A draft for another target is one pin and one golden whose request names it under <code class="docutils literal notranslate"><span class="pre">draft_model_path</span></code>. Verifying a block moves the target’s low-precision logits slightly, so a few percent of clips differ from plain decoding in punctuation or a near-tie word; the goldens hold each chip’s draft outputs like any other.</p>
+<p><code class="docutils literal notranslate"><span class="pre">moss_transcribe_diarize_server</span></code> and <code class="docutils literal notranslate"><span class="pre">moss_transcribe</span></code> take the same two flags; the CLI’s <code class="docutils literal notranslate"><span class="pre">verify_rounds</span></code> sums over audio chunks.</p>
 </section>
 <section id="rule-2-contribution-requirements">
 <h2>Rule 2: Contribution requirements<a class="headerlink" href="#rule-2-contribution-requirements" title="Link to this heading">#</a></h2>
@@ -681,12 +691,10 @@ headers by their path under <code class="docutils literal notranslate"><span cla
 <li><p>Reuse <code class="docutils literal notranslate"><span class="pre">layers</span></code>, <code class="docutils literal notranslate"><span class="pre">swift_port</span></code>, the Sortformer front end and the Silero VAD
 port. If your code duplicates something on <code class="docutils literal notranslate"><span class="pre">main</span></code>, move it into the shared
 file in the same PR.</p></li>
-<li><p>Voxt changes stay in <code class="docutils literal notranslate"><span class="pre">Omni*.swift</span></code>, <code class="docutils literal notranslate"><span class="pre">VoxtTests/Omni*</span></code> and <code class="docutils literal notranslate"><span class="pre">Voxt/backend/</span></code>,
-plus minimal routing edits.</p></li>
 </ul>
 <p><strong>Parity</strong></p>
 <ul class="simple">
-<li><p>Name the reference (Voxt’s Swift backend at a pinned mlx-audio-swift commit,
+<li><p>Name the reference (mlx-audio-swift at a pinned commit,
 or a Python MLX reference) and use the same weights and MLX version.</p></li>
 <li><p>Keep the reference’s behavior. Behavior changes go in a separate PR.</p></li>
 <li><p>Report English WER, Chinese CER and mixed MER on the 392-clip corpus,
@@ -714,7 +722,6 @@ kinds in <code class="docutils literal notranslate"><span class="pre">tests/test
 startup rejects. A change to the shared protocol (<code class="docutils literal notranslate"><span class="pre">common/service.cpp</span></code>,
 <code class="docutils literal notranslate"><span class="pre">qwen3_asr/asr_service.cpp</span></code>, <code class="docutils literal notranslate"><span class="pre">speech_service.cpp</span></code>, <code class="docutils literal notranslate"><span class="pre">realtime.cpp</span></code>) gets a
 case against <code class="docutils literal notranslate"><span class="pre">tests/stub_server.cpp</span></code>.</p></li>
-<li><p>New Voxt Omni tests go into the <code class="docutils literal notranslate"><span class="pre">voxt-unit</span></code> job in <code class="docutils literal notranslate"><span class="pre">voxt-mac-ci.yaml</span></code>.</p></li>
 </ul>
 <p><strong>Robustness</strong></p>
 <ul class="simple">
@@ -732,13 +739,11 @@ stated.</p></li>
 </ul>
 <p><strong>CI and style</strong></p>
 <ul class="simple">
-<li><p>Target <code class="docutils literal notranslate"><span class="pre">main</span></code> (stacked PRs get no Mac CI), non-draft, with the <code class="docutils literal notranslate"><span class="pre">run-mac-ci</span></code>
-or <code class="docutils literal notranslate"><span class="pre">run-all-ci</span></code> label. Both Mac CI jobs must pass on a real run.</p></li>
+<li><p>Target <code class="docutils literal notranslate"><span class="pre">main</span></code> (stacked PRs get no Mac CI), non-draft, with the <code class="docutils literal notranslate"><span class="pre">run-mac-ci</span></code> label. Both Mac CI jobs must pass on a real run.</p></li>
 <li><p>Run pre-commit and follow
 <a class="reference external" href="https://github.com/sgl-project/sglang-omni/blob/main/.claude/skills/code-review/coding-style.md">coding-style.md</a>.</p></li>
-<li><p>Update <code class="docutils literal notranslate"><span class="pre">Voxt/backend/README.md</span></code>. Follow the PR format of
-<a class="reference external" href="https://github.com/sgl-project/sglang-omni/pull/2676">#2676</a> or
-<a class="reference external" href="https://github.com/sgl-project/sglang-omni/pull/2689">#2689</a>.</p></li>
+<li><p>Follow the PR format of
+<a class="reference external" href="https://github.com/sgl-project/sglang-omni/pull/2676">#2676</a> or</p></li>
 </ul>
 </section>
 </section>
@@ -764,11 +769,11 @@ or <code class="docutils literal notranslate"><span class="pre">run-all-ci</span
       </div>
     </a>
     <a class="right-next"
-       href="../get_started/installation_npu.html"
+       href="long_audio.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">Installation — NPU</p>
+        <p class="prev-next-title">Qwen3-ASR long-recording measurements</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -827,7 +832,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Nov 05, 2026.
+  Last updated on Nov 07, 2026.
   <br/>
 </p>
   </div>

@@ -33,8 +33,8 @@
     <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=4418a689" />
     <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
-    <link rel="stylesheet" type="text/css" href="../_static/css/custom_log.css?v=a64801f4" />
-    <link rel="stylesheet" type="text/css" href="../_static/css/custom_log.css?v=a64801f4" />
+    <link rel="stylesheet" type="text/css" href="../_static/css/custom_log.css?v=3b484c19" />
+    <link rel="stylesheet" type="text/css" href="../_static/css/custom_log.css?v=3b484c19" />
   
   <!-- So that users can add custom icons -->
   <script defer src="../_static/scripts/fontawesome.js?digest=90905a2f556bf617f1a9"></script>
@@ -51,7 +51,7 @@
     <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'cookbook/qwen3_asr';</script>
     <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
-    <script src="../_static/js/sidebar_company_toggle.js?v=7622d557"></script>
+    <script src="../_static/js/sidebar_company_toggle.js?v=4014cbb0"></script>
     <script src="../_static/js/qwen3_omni_server_generator.js?v=d7738e8a"></script>
     <script src="../_static/js/ming_omni_server_generator.js?v=7979a72f"></script>
     <link rel="icon" href="../_static/logo.ico"/>
@@ -62,7 +62,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="0.2.0" />
-    <meta name="docbuild:last-update" content="Nov 05, 2026"/>
+    <meta name="docbuild:last-update" content="Nov 07, 2026"/>
   
     
     <script src="../_static/searchtools.js"></script>
@@ -216,7 +216,10 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Other Platforms</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1 has-children"><a class="reference internal" href="../get_started/installation_apple_silicon.html">Apple Silicon</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="../mlx/index.html">Native MLX / Voxt</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../mlx/index.html">Native MLX</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../mlx/long_audio.html">Qwen3-ASR long-recording measurements</a></li>
+</ul>
+</details></li>
 </ul>
 </details></li>
 <li class="toctree-l1"><a class="reference internal" href="../get_started/installation_npu.html">Ascend NPU</a></li>
@@ -747,8 +750,9 @@ for results measured on an earlier release.</p>
 <span class="w">  </span>--port<span class="w"> </span><span class="m">8000</span>
 </pre></div>
 </div>
-<p>DFlash requires greedy decoding (<code class="docutils literal notranslate"><span class="pre">temperature=0</span></code>), uses synchronous scheduling, and retains CUDA graphs. Realtime sessions are not validated.</p>
-<p>The command above caps the server at 8 running requests. A load sweep at the default cap with the prefix cache off (<a class="reference external" href="https://github.com/sgl-project/sglang-omni/pull/3454">#3454</a>), on one H200 over SeedTTS English clips, found that the draft gives no speedup at 32 concurrent requests and is about 10% slower at 64. To serve such a load, turn the draft off; <code class="docutils literal notranslate"><span class="pre">disable_speculative_decoding</span></code> drops every <code class="docutils literal notranslate"><span class="pre">speculative_*</span></code> key from the stage:</p>
+<p>DFlash serves any <code class="docutils literal notranslate"><span class="pre">temperature</span></code>. Above 0, verification accepts each drafted token with the target model’s probability for it and otherwise samples from the target’s remaining probabilities. ASR transcripts are confident, so sampling barely lowers acceptance: on one H100 with SeedTTS English and Chinese clips at 16 concurrent requests, each verification step committed 5.66 tokens at <code class="docutils literal notranslate"><span class="pre">temperature</span></code> 0, 5.66 at 0.7 and 5.62 at 1.0. On the same server at the default cap of 64 running requests, the speedup at 0.7 and 1.0 stayed close to its greedy speedup at every load tested, from 1 to 64 concurrent requests. DFlash retains CUDA graphs. Realtime sessions are not validated.</p>
+<p>The draft overlaps scheduling with host work by default; add <code class="docutils literal notranslate"><span class="pre">--asr.factory.enable_async_decode</span> <span class="pre">false</span></code> to schedule synchronously. On one H100 with greedy decoding and the prefix cache off, overlap ran at 1.12–1.26x synchronous scheduling on 60-second recordings, 1.01–1.15x on SeedTTS English clips and 0.99–1.15x on SeedTTS Chinese clips, from 1 to 64 concurrent requests, with the same WER and CER. On short clips it also removed the draft’s loss under load: at 64 concurrent requests the synchronous draft ran at 0.94x the server without a draft on English clips and 0.91x on Chinese, and the overlapped draft at 1.08x and 1.04x. Overlap runs one extra verify round per request, so the logged acceptance length drops (5.9 to 4.6 tokens on English clips), and streamed first text arrives about 2 ms later for one short clip at a time.</p>
+<p>The command above caps the server at 8 running requests. A load sweep at the default cap with the prefix cache off (<a class="reference external" href="https://github.com/sgl-project/sglang-omni/pull/3454">#3454</a>), on one H200 over SeedTTS English clips, found that the synchronous draft gives no speedup at 32 concurrent requests and is about 10% slower at 64. To serve such a load, turn the draft off; <code class="docutils literal notranslate"><span class="pre">disable_speculative_decoding</span></code> drops every <code class="docutils literal notranslate"><span class="pre">speculative_*</span></code> key from the stage:</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sgl-omni<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--config<span class="w"> </span>examples/configs/qwen3_asr_1_7b_dflash.yaml<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--asr.engine.disable_speculative_decoding<span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
@@ -1328,7 +1332,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Nov 05, 2026.
+  Last updated on Nov 07, 2026.
   <br/>
 </p>
   </div>

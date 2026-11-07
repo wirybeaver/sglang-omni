@@ -33,8 +33,8 @@
     <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=4418a689" />
     <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
-    <link rel="stylesheet" type="text/css" href="../_static/css/custom_log.css?v=a64801f4" />
-    <link rel="stylesheet" type="text/css" href="../_static/css/custom_log.css?v=a64801f4" />
+    <link rel="stylesheet" type="text/css" href="../_static/css/custom_log.css?v=3b484c19" />
+    <link rel="stylesheet" type="text/css" href="../_static/css/custom_log.css?v=3b484c19" />
   
   <!-- So that users can add custom icons -->
   <script defer src="../_static/scripts/fontawesome.js?digest=90905a2f556bf617f1a9"></script>
@@ -51,7 +51,7 @@
     <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'developer_reference/bump_version';</script>
     <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
-    <script src="../_static/js/sidebar_company_toggle.js?v=7622d557"></script>
+    <script src="../_static/js/sidebar_company_toggle.js?v=4014cbb0"></script>
     <script src="../_static/js/qwen3_omni_server_generator.js?v=d7738e8a"></script>
     <script src="../_static/js/ming_omni_server_generator.js?v=7979a72f"></script>
     <link rel="icon" href="../_static/logo.ico"/>
@@ -61,7 +61,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="0.2.0" />
-    <meta name="docbuild:last-update" content="Nov 05, 2026"/>
+    <meta name="docbuild:last-update" content="Nov 07, 2026"/>
   
     
     <script src="../_static/searchtools.js"></script>
@@ -215,7 +215,10 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Other Platforms</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1 has-children"><a class="reference internal" href="../get_started/installation_apple_silicon.html">Apple Silicon</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="../mlx/index.html">Native MLX / Voxt</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../mlx/index.html">Native MLX</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../mlx/long_audio.html">Qwen3-ASR long-recording measurements</a></li>
+</ul>
+</details></li>
 </ul>
 </details></li>
 <li class="toctree-l1"><a class="reference internal" href="../get_started/installation_npu.html">Ascend NPU</a></li>
@@ -969,9 +972,11 @@ inherited upstream change a user can observe, and the A/B with both arms’
 commits and image digests, sample counts and the profiler attribution for
 any delta outside noise. Measurements and inferences are labeled as what
 they are.</p>
-<p>Run CI with <code class="docutils literal notranslate"><span class="pre">run-all-ci</span></code>. A stage without a model label draws its model at
-random, so give each preset its own run on the new image before merge: keep
-<code class="docutils literal notranslate"><span class="pre">run-all-ci</span></code> and add one model label per stage, for example
+<p>Run CI on every H100 model stage with
+<code class="docutils literal notranslate"><span class="pre">/tag-and-rerun-ci</span> <span class="pre">asr</span> <span class="pre">tts</span> <span class="pre">mps</span> <span class="pre">omni</span> <span class="pre">full-duplex</span> <span class="pre">cascaded</span></code>. A stage without a
+model label draws its model at random, so give each preset its own run on the
+new image before merge: keep those stage labels and add one model label per
+stage, for example
 <code class="docutils literal notranslate"><span class="pre">run-moss-tts-local-transformer-v1.5</span></code>, <code class="docutils literal notranslate"><span class="pre">run-fun-asr-nano-2512</span></code> and
 <code class="docutils literal notranslate"><span class="pre">run-minicpm-o-4.5</span></code>. The model labels within a stage are exclusive. The
 CI section of the pull request template lists every label.</p>
@@ -1061,7 +1066,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Nov 05, 2026.
+  Last updated on Nov 07, 2026.
   <br/>
 </p>
   </div>
