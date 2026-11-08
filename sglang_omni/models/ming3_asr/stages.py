@@ -9,11 +9,13 @@ from typing import ClassVar
 
 import torch
 from pydantic import JsonValue
+from sglang.srt.layers.logits_processor import LogitsProcessorOutput
 from sglang.srt.managers.schedule_batch import Req
 from sglang.srt.models.registry import ModelRegistry
 from sglang.srt.sampling.sampling_params import SamplingParams
 from transformers import AutoConfig, PreTrainedTokenizerFast
 
+from sglang_omni.capture.features import CaptureRequest, TokenSpan
 from sglang_omni.models.ming3_asr.encoder_service import Ming3ASRPreLMEncoderService
 from sglang_omni.models.ming3_asr.preprocessing import (
     Ming3ASRPreprocessor,
@@ -77,6 +79,7 @@ def create_thinker_executor(
     model_path: str,
     *,
     max_seq_len: int,
+    capture_layer_ids: tuple[int, ...] | None = None,
     max_new_tokens: int,
     stream_emit_interval_seconds: float,
     pre_lm_max_batch_size: int,
@@ -107,6 +110,15 @@ def create_thinker_executor(
         )
     else:
         pass
+    if (
+        capture_layer_ids is not None
+        and "last_hidden_states" not in LogitsProcessorOutput.__dataclass_fields__
+    ):
+        raise RuntimeError(
+            "Capture requires a SGLang runtime with last_hidden_states support"
+        )
+    else:
+        pass
     resolved_device = resolve_concrete_device(device, gpu_id)
     configuration = load_checkpoint_config(model_path)
     encoder = Ming3AudioEncoder(
@@ -130,6 +142,10 @@ def create_thinker_executor(
         disable_radix_cache=True,
         chunked_prefill_size=-1,
     )
+    if capture_layer_ids is not None:
+        overrides.update(disable_cuda_graph=True, disable_overlap_schedule=True)
+    else:
+        pass
     server_args = build_sglang_server_args(
         model_path, context_length=max_seq_len, **overrides
     )
@@ -142,6 +158,11 @@ def create_thinker_executor(
             total_gpu_memory_fraction=total_gpu_memory_fraction,
         )
     )
+    if capture_layer_ids is not None:
+        worker.model_runner.model.set_dspark_layers_to_capture(list(capture_layer_ids))
+        worker.model_runner.model.logits_processor.keep_last_hidden_states = True
+    else:
+        pass
     tokenizer = PreTrainedTokenizerFast.from_pretrained(model_path)
     end_token_id = configuration["text_config"]["eos_token_id"]
     encoder_service = Ming3ASRPreLMEncoderService(
@@ -158,9 +179,35 @@ def create_thinker_executor(
         else:
             pass
         parameters = payload.request.params
+        replay_token_ids = (
+            parameters.get("teacher_token_ids")
+            if capture_layer_ids is not None
+            else None
+        )
+        prompt_token_count = len(state["input_ids"])
+        input_ids = state["input_ids"]
+        if replay_token_ids is not None:
+            if len(replay_token_ids) < 1 or replay_token_ids[-1] != end_token_id:
+                raise ValueError("Replay requires teacher text tokens followed by EOS")
+            else:
+                input_ids = torch.cat(
+                    (input_ids, torch.tensor(replay_token_ids, dtype=torch.long))
+                )
+        else:
+            pass
+        if capture_layer_ids is not None and len(input_ids) >= max_seq_len:
+            raise ValueError(
+                "Capture input leaves no room for the replay completion token"
+            )
+        else:
+            pass
         sampling = SamplingParams(
             temperature=parameters.get("temperature", 0.0),
-            max_new_tokens=parameters.get("max_new_tokens", max_new_tokens),
+            max_new_tokens=(
+                1
+                if replay_token_ids is not None
+                else parameters.get("max_new_tokens", max_new_tokens)
+            ),
             top_p=parameters.get("top_p", 1.0),
             top_k=parameters.get("top_k", -1),
             repetition_penalty=parameters.get("repetition_penalty", 1.0),
@@ -171,13 +218,27 @@ def create_thinker_executor(
         request = Req(
             rid=payload.request_id,
             origin_input_text="",
-            origin_input_ids=state["input_ids"].tolist(),
+            origin_input_ids=input_ids.tolist(),
             sampling_params=sampling,
             vocab_size=model_config.vocab_size,
             eos_token_ids={end_token_id},
         )
         return Ming3ASRRequestData(
-            input_ids=state["input_ids"],
+            input_ids=input_ids,
+            teacher_capture=(
+                CaptureRequest(
+                    input_ids=input_ids,
+                    generated_spans=(
+                        TokenSpan(
+                            start_token_index=prompt_token_count,
+                            end_token_index=len(input_ids),
+                        ),
+                    ),
+                    layer_ids=capture_layer_ids,
+                )
+                if replay_token_ids is not None
+                else None
+            ),
             req=request,
             model_inputs={
                 "audio_positions": state["audio_positions"],
@@ -192,6 +253,19 @@ def create_thinker_executor(
 
     def build_result(request: Ming3ASRRequestData) -> StagePayload:
         payload = request.stage_payload
+        if capture_layer_ids is not None:
+            payload.data = {
+                "output_ids": list(request.output_ids),
+                "finish_reason": request.finish_reason,
+                "capture": (
+                    request.teacher_capture.result
+                    if request.teacher_capture is not None
+                    else None
+                ),
+            }
+            return payload
+        else:
+            pass
         generated_text = tokenizer.decode(
             request.output_ids,
             skip_special_tokens=True,
