@@ -14,8 +14,10 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Generic, Protocol, TypeAlias
 
 import torch
+from sglang.srt.model_executor.forward_batch_info import CaptureHiddenMode
 from sglang.srt.utils.common import is_pin_memory_available
 
+from sglang_omni.capture.features import capture_sequences
 from sglang_omni.model_runner.model_worker import ModelWorker
 from sglang_omni.model_runner.prefill_inputs import (
     clear_omni_prefill_inputs,
@@ -41,10 +43,7 @@ if TYPE_CHECKING:
     from sglang.srt.layers.logits_processor import LogitsProcessorOutput
     from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
     from sglang.srt.managers.scheduler import GenerationBatchResult
-    from sglang.srt.model_executor.forward_batch_info import (
-        CaptureHiddenMode,
-        ForwardBatch,
-    )
+    from sglang.srt.model_executor.forward_batch_info import ForwardBatch
     from sglang.srt.sampling.sampling_batch_info import SamplingBatchInfo
 
     from sglang_omni.models.dots_tts.model_runner import DotsFlowLaunchBuf
@@ -953,6 +952,25 @@ class ModelRunner(Generic[RequestDataInput]):
         requests: list[SchedulerRequest],
     ) -> None:
         """Called after prefill forward."""
+        capture_requests = [request.data.teacher_capture for request in requests]
+        if not any(capture is not None for capture in capture_requests):
+            return
+        else:
+            pass
+        assert all(capture is not None for capture in capture_requests)
+        output = result.logits_output
+        if output.hidden_states is None or output.last_hidden_states is None:
+            raise RuntimeError(
+                "Capture requires FULL auxiliary and post-norm final states"
+            )
+        else:
+            capture_sequences(
+                capture_requests,
+                forward_batch.extend_seq_lens_cpu,
+                forward_batch.extend_prefix_lens_cpu,
+                output.hidden_states,
+                output.last_hidden_states,
+            )
 
     def post_decode(
         self,
@@ -1077,7 +1095,10 @@ class ModelRunner(Generic[RequestDataInput]):
     def requested_capture_hidden_mode_prefill(
         self, schedule_batch: ScheduleBatch, requests: list[SchedulerRequest]
     ) -> CaptureHiddenMode | None:
-        return None
+        if any(request.data.teacher_capture is not None for request in requests):
+            return CaptureHiddenMode.FULL
+        else:
+            return None
 
     def requested_capture_hidden_mode_decode(
         self, schedule_batch: ScheduleBatch, requests: list[SchedulerRequest]

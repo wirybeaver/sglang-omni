@@ -18,6 +18,7 @@ from typing import (
 
 from typing_extensions import TypeVar
 
+from sglang_omni.capture.features import CaptureRequest
 from sglang_omni.scheduling.message import OutgoingMessage
 
 if TYPE_CHECKING:
@@ -120,6 +121,7 @@ class ARRequestData:
     return_logprob: bool = False
     output_token_logprobs: list[list[float | int]] = field(default_factory=list)
     capture_model_output_keys: tuple[str, ...] = ()
+    teacher_capture: CaptureRequest | None = None
     max_new_tokens: int | None = None
     enforce_request_limits: bool = False
     temperature: float = 0.0

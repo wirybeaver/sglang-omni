@@ -79,7 +79,9 @@ def make_scheduler_output(*, is_prefill: bool):
         prefill_input_ids_cpu=None,
         mix_running_indices=None,
     )
-    request_data = SimpleNamespace(generation_steps=0, extra_model_outputs={})
+    request_data = SimpleNamespace(
+        generation_steps=0, extra_model_outputs={}, teacher_capture=None
+    )
     request = SimpleNamespace(request_id="req-1", data=request_data)
     return SimpleNamespace(batch_data=schedule_batch, requests=[request])
 
@@ -427,7 +429,9 @@ def test_finalize_default_batch_generation_hook_calls_single_hook() -> None:
     requests = [
         SimpleNamespace(
             request_id="req-1",
-            data=SimpleNamespace(generation_steps=0, extra_model_outputs={}),
+            data=SimpleNamespace(
+                generation_steps=0, extra_model_outputs={}, teacher_capture=None
+            ),
         ),
         SimpleNamespace(
             request_id="req-2",
