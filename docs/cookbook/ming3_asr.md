@@ -148,6 +148,13 @@ data: [DONE]
 
 The first stable text is emitted immediately; later updates use a 50 ms interval (`--thinker.factory.stream_emit_interval_seconds`). Completion flushes pending text, the language header is removed, and concatenated deltas equal the done event's `text`. When `max_new_tokens` is reached, `transcript.text.done` includes `"finish_reason":"length"` and the partial transcript.
 
-## KDA diagonal anchor
+## Router kernel selection
 
-The CUDA thinker applies the KDA diagonal anchor fix from [sglang#48745](https://github.com/sgl-project/sglang/pull/48745) while it is absent from the pinned dependency. The patch aligns the unfused gate normalization anchor with the fused path and is installed before model construction and CUDA Graph capture.
+The CUDA thinker applies the KDA diagonal anchor fix from [sglang#48745](https://github.com/sgl-project/sglang/pull/48745) and supports the router opt-out from [sglang#49142](https://github.com/sgl-project/sglang/pull/49142) while those changes are absent from the pinned dependency. Native matvec selection remains enabled by default. Set the engine option to `true` to use `F.linear` in ordinary or deterministic inference; the latter uses the batch-invariant GEMM.
+
+```bash
+sgl-omni serve --model-path inclusionAI/Ming-3.0-asr-tiny \
+  --thinker.engine.disable_router_gate_matvec true
+```
+
+The option is applied before model construction and CUDA Graph capture. It can be combined with `--thinker.engine.enable_deterministic_inference true`.
