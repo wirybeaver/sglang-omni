@@ -29,7 +29,14 @@ class Ming3ASRFactoryArgs(FactoryArgs):
     stream_emit_interval_seconds: float = Field(default=0.05, ge=0, allow_inf_nan=False)
 
 
+class Ming3ASREngineArgs(EngineArgs):
+    """Router kernel selection for the thinker."""
+
+    disable_router_gate_matvec: bool = False
+
+
 class Ming3ASRThinkerStageConfig(EngineStageConfig):
+    engine: Ming3ASREngineArgs = Field(default_factory=Ming3ASREngineArgs)
     factory: Ming3ASRFactoryArgs = Field(default_factory=Ming3ASRFactoryArgs)
 
 
@@ -54,7 +61,7 @@ def default_stages() -> list[StageConfig]:
                 request_build_max_workers=8,
                 request_build_max_pending=32,
             ),
-            engine=EngineArgs(
+            engine=Ming3ASREngineArgs(
                 mem_fraction_static=0.75,
                 max_running_requests=64,
                 cuda_graph_max_bs=64,
