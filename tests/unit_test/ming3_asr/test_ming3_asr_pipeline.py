@@ -3,7 +3,7 @@
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -349,3 +349,48 @@ def test_dspark_startup_failure_releases_adapted_checkpoint(
     with pytest.raises(FileNotFoundError):
         create_thinker_executor(**factory_arguments)
     assert not checkpoint_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("arguments", "disabled"),
+    [([], False), (["--thinker.engine.disable_router_gate_matvec", "true"], True)],
+)
+def test_router_engine_option_is_consumed_before_native_args(
+    arguments: list[str], disabled: bool
+) -> None:
+    config = Ming3ASRPipelineConfig(model_path="missing-checkpoint")
+    manager = ConfigManager(config)
+    config = manager.merge_config(manager.parse_extra_args(arguments))
+    factory_arguments = resolve_stage_factory_args(config.stages[1], config)
+    configuration = {
+        "audio_config": {
+            "n_mels": 4,
+            "n_audio_ctx": 8,
+            "n_audio_state": 4,
+            "n_audio_head": 1,
+            "n_audio_layer": 1,
+            "downsampler_kernel_size_list": [3],
+            "downsampler_stride_list": [2],
+        },
+        "text_config": {"hidden_size": 4},
+    }
+    with (
+        patch.object(
+            stages, "resolve_concrete_device", return_value=torch.device("cuda:0")
+        ),
+        patch.object(stages, "patch_kda_diagonal_anchor"),
+        patch.object(stages, "patch_bailing_router_gate") as router_patch,
+        patch.object(stages, "load_checkpoint_config", return_value=configuration),
+        patch.object(stages, "Ming3AudioEncoder"),
+        patch.object(stages.AutoConfig, "register"),
+        patch.dict(stages.ModelRegistry.models),
+        patch.object(
+            stages,
+            "build_sglang_server_args",
+            side_effect=RuntimeError("stop before native engine startup"),
+        ) as builder,
+        pytest.raises(RuntimeError, match="stop before native engine startup"),
+    ):
+        create_thinker_executor(**factory_arguments)
+    router_patch.assert_called_once_with(disabled)
+    assert "disable_router_gate_matvec" not in builder.call_args.kwargs
