@@ -16,6 +16,7 @@ from sglang.srt.sampling.sampling_params import SamplingParams
 from sglang.utils import LazyImport
 from transformers import AutoConfig, PreTrainedTokenizerFast
 
+from sglang_omni.models.ming3_asr.config import Ming3ASREngineArgs
 from sglang_omni.models.ming3_asr.encoder_service import Ming3ASRPreLMEncoderService
 from sglang_omni.models.ming3_asr.preprocessing import (
     Ming3ASRPreprocessor,
@@ -46,6 +47,9 @@ from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
 from sglang_omni.speculative.dspark_checkpoint import materialize_draft_checkpoint
 from sglang_omni.utils.device import resolve_concrete_device
 
+patch_bailing_router_gate: LazyImport = LazyImport(
+    "sglang_omni.vendor.sglang.router_gate", "patch_bailing_router_gate"
+)
 patch_kda_diagonal_anchor: LazyImport = LazyImport(
     "sglang_omni.vendor.sglang.kda", "patch_kda_diagonal_anchor"
 )
@@ -121,9 +125,12 @@ def create_thinker_executor(
     else:
         pass
     overrides = dict(server_args_overrides or {})
+    router_options = Ming3ASREngineArgs.model_validate(overrides)
+    overrides.pop("disable_router_gate_matvec", None)
     resolved_device = resolve_concrete_device(device, gpu_id)
     if resolved_device.type == "cuda":
         patch_kda_diagonal_anchor()
+        patch_bailing_router_gate(router_options.disable_router_gate_matvec)
     else:
         pass
     with ExitStack() as resources:
