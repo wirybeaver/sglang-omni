@@ -2152,6 +2152,36 @@ async def test_running_transcript_cuts_an_utterance_at_commit_plus_tail():
     ]
 
 
+@pytest.mark.asyncio
+async def test_ming_audio_dialog_preserves_waveform_and_interrupts_playback() -> None:
+    settings = profile_config("ming3-audio-qwen3-tts").component_graph()
+    dialog = COMPONENTS.build(settings.node("dialog").component)
+    generator = COMPONENTS.build(settings.node("llm").component)
+    samples = b"\x01\x02" * 320
+    try:
+        outputs = await drain(
+            dialog,
+            [
+                control_chunk(SPEECH_STARTED, t_ms=0),
+                TimedChunk(AUDIO, 0, 20, 0, samples, format=PCM16),
+                control_chunk(SPEECH_STOPPED, t_ms=20),
+                control_chunk(SPEECH_STARTED, t_ms=30),
+            ],
+        )
+        (prompt,) = [chunk for chunk in outputs if chunk.format == MESSAGES]
+        body = generator.request_body(messages_of(prompt))
+        audio = body["messages"][-1]["content"][0]["input_audio"]
+        with wave.open(io.BytesIO(base64.b64decode(audio["data"]))) as recording:
+            assert recording.getframerate() == 16000
+            assert recording.readframes(recording.getnframes()) == samples
+        assert any(
+            control_type(chunk) == INTERRUPT and chunk.turn == prompt.turn
+            for chunk in outputs
+        )
+    finally:
+        await generator.close()
+
+
 @pytest.mark.parametrize("profile", PROFILE_NAMES)
 def test_profiles_expand_components_into_independent_session_nodes(profile):
     config = profile_config(profile)

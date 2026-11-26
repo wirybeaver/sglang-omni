@@ -329,8 +329,8 @@ class Dialog(StreamComponent):
         self.config = config
         self.emit: ChunkEmitter | None = None
         self.messages = [ChatMessage(role="system", content=config.system_prompt)]
-        # Waiting utterances as (turn, transcript, language the recognizer heard).
-        self.waiting: deque[tuple[int, str, str | None]] = deque()
+        # Waiting utterances carry the turn, transcript, language and optional WAV.
+        self.waiting: deque[tuple[int, str, str | None, str | None]] = deque()
         self.reply: list[str] | None = None
         # note (Haoling Pu): the open reply's style changes, each as (characters of the reply before it, style).
         self.reply_style_starts: list[tuple[int, str]] = []
@@ -401,9 +401,13 @@ class Dialog(StreamComponent):
 
     def state_bytes(self) -> int:
         chars = sum(message_chars(message) for message in self.messages)
-        chars += sum(len(text) for _, text, _ in self.waiting)
+        chars += sum(len(text) for _, text, _, _ in self.waiting)
+        audio_bytes = sum(
+            len(wav) for message in self.messages for wav in message.audio_wavs or ()
+        )
+        audio_bytes += sum(len(wav) for _, _, _, wav in self.waiting if wav)
         chars += sum(len(part) for part in self.reply or ())
-        return chars * 4
+        return chars * 4 + audio_bytes
 
     def is_reply(self, chunk: TimedChunk) -> bool:
         return self.reply is not None and chunk.turn == self.reply_turn
@@ -444,6 +448,7 @@ class Dialog(StreamComponent):
                     self.turns,
                     str(chunk.payload["text"]).strip(),
                     chunk_language(chunk),
+                    None,
                 )
             )
             self.emit(control_chunk(TURN_QUEUED, turn=self.turns))
@@ -912,7 +917,10 @@ class Dialog(StreamComponent):
         """Drop the reply at index, which the history keeps nothing of, and join the user messages around it: nothing of the reply was heard, so the user kept talking, and an empty assistant entry would only show the model an empty answer to copy."""
         self.messages[index - 1] = ChatMessage(
             role="user",
-            content=f"{self.messages[index - 1].content} {self.messages[index + 1].content}",
+            content=f"{self.messages[index - 1].content} {self.messages[index + 1].content}".strip(),
+            audio_wavs=(self.messages[index - 1].audio_wavs or [])
+            + (self.messages[index + 1].audio_wavs or [])
+            or None,
         )
         del self.messages[index : index + 2]
         if self.truncatable is not None and self.truncatable[1] == index:
@@ -920,9 +928,11 @@ class Dialog(StreamComponent):
         else:
             pass
 
-    def respond(self, turn: int, text: str, language: str | None) -> list[TimedChunk]:
+    def respond(
+        self, turn: int, text: str, language: str | None, audio_wav: str | None = None
+    ) -> list[TimedChunk]:
         history_chars = sum(message_chars(message) for message in self.messages)
-        if not text:
+        if not text and not audio_wav:
             return [control_chunk(TURN_EMPTY, turn=turn)]
         elif len(text) > self.config.max_text_chars:
             raise ValueError("transcript exceeds max_text_chars")
@@ -934,7 +944,13 @@ class Dialog(StreamComponent):
                 "conversation exceeds max_history_chars; open a new session"
             )
         else:
-            self.messages.append(ChatMessage(role="user", content=text))
+            self.messages.append(
+                ChatMessage(
+                    role="user",
+                    content=text,
+                    audio_wavs=[audio_wav] if audio_wav else None,
+                )
+            )
             if self.messages[-2].role == "assistant" and not self.messages[-2].content:
                 self.join_around(len(self.messages) - 2)
             else:

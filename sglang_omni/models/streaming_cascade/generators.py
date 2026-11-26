@@ -302,6 +302,22 @@ class OpenAIChatGenerator(Replier):
         self, messages: list[ChatMessage], tool_choice: str | None = None
     ) -> dict[str, object]:
         message_dicts = [message_dict(message) for message in messages]
+        for message in message_dicts:
+            if audio_wavs := message.pop("audio_wavs", None):
+                parts = [
+                    {
+                        "type": "input_audio",
+                        "input_audio": {"data": wav, "format": "wav"},
+                    }
+                    for wav in audio_wavs
+                ]
+                if message["content"]:
+                    parts.append({"type": "text", "text": message["content"]})
+                else:
+                    pass
+                message["content"] = parts
+            else:
+                pass
         body: dict[str, object] = {
             "model": self.config.model,
             "messages": message_dicts,

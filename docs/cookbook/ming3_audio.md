@@ -84,6 +84,16 @@ Usage notes:
 - SeedTTS English WER is 1.227% and Chinese CER 0.747% with the draft, against 1.219% and 0.741% without it. One at a time, MTP output is identical to the server without a draft; the draft's is identical on 81 of 84 held-out transcripts and differs more on long answers. At 8 at a time, both agree with the server without a draft on 263-264 of 280 transcripts, because greedy decoding on this thinker depends on the batch.
 - The draft decodes synchronously. Keep `repetition_penalty=1`. The draft rejects a request `seed` when sampling; greedy and one-token requests still accept a seed. Standalone speech synthesis is unaffected.
 
+## Realtime audio cascade
+
+Start the VAD, Ming audio dialog and Qwen3-TTS profile from the repository root. Its chat service uses GPUs 0 and 1 and its speech service uses GPU 2.
+
+```bash
+sgl-omni serve --config examples/streaming_cascade/profiles/ming3-audio-qwen3-tts/launch.yaml --enable-realtime --port 8097
+```
+
+Connect to `/v1/realtime`. The dialog submits each completed 16 kHz utterance as WAV audio to Ming, keeps previous utterances in the conversation, and routes the reply text to TTS. Speaking during playback interrupts the reply. This profile uses turn-based audio input.
+
 ## Transcription
 
 ```bash

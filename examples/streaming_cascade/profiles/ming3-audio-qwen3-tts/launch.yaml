@@ -1,0 +1,54 @@
+config_cls: StreamingCascadePipelineConfig
+model_path: examples/streaming_cascade/profiles/ming3-audio-qwen3-tts
+
+services:
+  - name: chat
+    command: [sgl-omni, serve, --model-path, inclusionAI/Ming-3.0-audio-flash, --thinker.tp_size, "2", --port, "8003"]
+    port: 8003
+    env: {CUDA_VISIBLE_DEVICES: "0,1"}
+  - name: tts
+    command: [sgl-omni, serve, --model-path, Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice, --config, examples/configs/qwen3_tts_0_6b_customvoice.yaml, --port, "8005"]
+    port: 8005
+    env: {CUDA_VISIBLE_DEVICES: "2"}
+
+session_nodes:
+  vad:
+    stages: [vad]
+    inputs: [input]
+  dialog:
+    kind: audio_dialog
+    inputs:
+      - "input:pcm16"
+      - "input:session"
+      - "vad:session"
+      - {source: "llm:text_delta", feedback: true, overflow: drop_oldest, capacity: 1024}
+      - {source: "tts:session", feedback: true, overflow: drop_oldest, capacity: 1024}
+      - {kind: control, source: input, event: interrupt}
+      - {kind: control, source: aligner, event: reply.progress}
+    system_prompt: Listen to the user's audio and reply concisely in their language.
+  llm:
+    kind: openai_chat
+    model: inclusionAI/Ming-3.0-audio-flash
+    base_url: http://127.0.0.1:8003/v1
+    inputs:
+      - dialog
+      - {kind: control, source: dialog, event: interrupt}
+  tts:
+    kind: openai_speech
+    model: Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
+    base_url: http://127.0.0.1:8005/v1
+    voice: Vivian
+    inputs:
+      - llm
+      - {kind: control, source: dialog, event: interrupt}
+  aligner:
+    kind: alignment
+    method: sentence
+    inputs: ["llm:text_delta", "tts:pcm_f32le", "tts:session", "dialog:session"]
+
+session_publish:
+  vad: [session]
+  dialog: [session]
+  llm: [text_delta]
+  tts: [pcm_f32le, session]
+  aligner: [session]

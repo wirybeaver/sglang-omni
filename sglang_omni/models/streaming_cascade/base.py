@@ -98,6 +98,7 @@ class ChatMessage(BaseModel):
 
     role: Literal["system", "user", "assistant", "tool"]
     content: str = ""
+    audio_wavs: list[str] | None = None
     tool_calls: list[AssistantToolCall] | None = None
     tool_call_id: str | None = None
     uncertain: bool = False
