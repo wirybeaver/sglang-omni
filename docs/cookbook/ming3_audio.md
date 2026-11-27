@@ -86,13 +86,13 @@ Usage notes:
 
 ## Realtime audio cascade
 
-Start the VAD, Ming audio dialog and Qwen3-TTS profile from the repository root. Its chat service uses GPUs 0 and 1 and its speech service uses GPU 2.
+Start the profile from the repository root. It uses one Ming-3.0-audio-flash service on GPUs 0 and 1 for both audio chat and speech synthesis.
 
 ```bash
-sgl-omni serve --config examples/streaming_cascade/profiles/ming3-audio-qwen3-tts/launch.yaml --enable-realtime --port 8097
+sgl-omni serve --config examples/streaming_cascade/profiles/ming3-audio/launch.yaml --enable-realtime --port 8097
 ```
 
-Connect to `/v1/realtime`. The dialog submits each completed 16 kHz utterance as WAV audio to Ming, keeps previous utterances in the conversation, and routes the reply text to TTS. Speaking during playback interrupts the reply. This profile uses turn-based audio input.
+Connect to `/v1/realtime`. The dialog submits each completed 16 kHz utterance as WAV audio to Ming and keeps previous utterances in the conversation. Ming streams reply text and its talker synthesizes each sentence as a complete 24 kHz PCM response, which the cascade sends to the client. Speaking during playback interrupts the reply. This profile uses turn-based audio input.
 
 ## Transcription
 

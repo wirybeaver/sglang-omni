@@ -2154,7 +2154,7 @@ async def test_running_transcript_cuts_an_utterance_at_commit_plus_tail():
 
 @pytest.mark.asyncio
 async def test_ming_audio_dialog_preserves_waveform_and_interrupts_playback() -> None:
-    settings = profile_config("ming3-audio-qwen3-tts").component_graph()
+    settings = profile_config("ming3-audio").component_graph()
     dialog = COMPONENTS.build(settings.node("dialog").component)
     generator = COMPONENTS.build(settings.node("llm").component)
     samples = b"\x01\x02" * 320
@@ -2180,6 +2180,32 @@ async def test_ming_audio_dialog_preserves_waveform_and_interrupts_playback() ->
         )
     finally:
         await generator.close()
+
+
+@pytest.mark.asyncio
+async def test_ming_audio_profile_plays_complete_pcm_at_the_session_rate() -> None:
+    settings = profile_config("ming3-audio").component_graph()
+    synth = COMPONENTS.build(settings.node("tts").component)
+    samples = np.array([16384, -16384], dtype="<i2")
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["stream"] is False
+        assert body["response_format"] == "pcm"
+        assert body["sample_rate"] == 24000
+        assert body["input"] == "Found it."
+        return httpx.Response(
+            200, content=samples.tobytes(), headers={"X-Sample-Rate": "24000"}
+        )
+
+    await synth.client.aclose()
+    synth.client = httpx.AsyncClient(transport=httpx.MockTransport(answer))
+    outputs = await drain(
+        synth, [text_chunk("Found it.", 1), control_chunk(TURN_DONE, turn=1)]
+    )
+    (spoken,) = [chunk for chunk in outputs if chunk.modality == AUDIO]
+    assert np.frombuffer(spoken.payload, dtype="<f4").tolist() == [0.5, -0.5]
+    assert control_type(outputs[-1]) == TURN_DONE
 
 
 @pytest.mark.parametrize("profile", PROFILE_NAMES)
