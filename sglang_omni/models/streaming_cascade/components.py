@@ -9,6 +9,10 @@ from sglang_omni.models.streaming_cascade.alignment import (
     AlignmentConfig,
     probe_alignment_worker,
 )
+from sglang_omni.models.streaming_cascade.audio_dialog import (
+    AudioDialog,
+    AudioDialogConfig,
+)
 from sglang_omni.models.streaming_cascade.base import (
     SPEECH_SAMPLE_RATE_HZ,
     ComponentConfig,
@@ -181,6 +185,13 @@ COMPONENTS.register(
 )
 
 
+COMPONENTS.register(
+    AudioDialogConfig,
+    AudioDialog,
+    consumes=frozenset({PCM16, TEXT_DELTA, SESSION_CONTROL}),
+    produces=frozenset({MESSAGES, SESSION_CONTROL}),
+    opens_turns=True,
+)
 COMPONENTS.register(
     DialogConfig,
     Dialog,

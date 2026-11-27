@@ -95,7 +95,10 @@ class SpeechReference(BaseModel):
 
 
 class OpenAISpeechSynthesizerConfig(ComponentConfig):
-    """Sentence-chunked `/v1/audio/speech` streaming PCM, one request per sentence.
+    """Sentence-chunked speech synthesis over /v1/audio/speech.
+
+    With stream disabled, the service returns a complete 24 kHz PCM response
+    per sentence.
 
     `language` is the service's language tag: empty leaves it to the
     service, `auto` follows the language the recognizer heard from the
@@ -120,6 +123,7 @@ class OpenAISpeechSynthesizerConfig(ComponentConfig):
     base_url: str = Field(pattern=r"^https?://[^/]+")
     model: str
     voice: str = "default"
+    stream: bool = True
     reference_audio_path: str = ""
     reference_text: str = ""
     styles: dict[str, SpeechReference] = Field(default_factory=dict)
@@ -367,8 +371,12 @@ class OpenAISpeechSynthesizer(TurnSpeaker):
             "voice": self.config.voice,
             "input": sentence,
             "response_format": "pcm",
-            "stream": True,
+            "stream": self.config.stream,
         }
+        if not self.config.stream:
+            body["sample_rate"] = self.sample_rate_hz
+        else:
+            pass
         if language is not None:
             body["language"] = language
             if language == "English":
@@ -404,7 +412,7 @@ class OpenAISpeechSynthesizer(TurnSpeaker):
                 )
             elif int(rate) != self.sample_rate_hz:
                 raise ValueError(
-                    f"speech service streams {rate} Hz, expected {self.sample_rate_hz}"
+                    f"speech service returned {rate} Hz, expected {self.sample_rate_hz}"
                 )
             else:
                 pass
